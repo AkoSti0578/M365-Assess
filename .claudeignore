@@ -1,0 +1,11 @@
+# Assessment output (large, generated data)
+M365-Assessment/
+
+# Document template unpacked working dirs
+unpacked*/
+
+# Skill plugin artifacts
+skills-plugin/
+
+# Node modules (if any)
+node_modules/

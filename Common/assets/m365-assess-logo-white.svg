@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
+  <defs>
+    <linearGradient id="cloudGradW" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60A5FA;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3B82F6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="checkGradW" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#93C5FD;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#60A5FA;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Cloud shape -->
+  <path d="M28,75 C20,75 14,69 14,61 C14,54 19,48 25,47 C25,37 33,29 43,29 C50,29 56,33 59,38 C61,37 64,36 67,36 C76,36 83,43 83,52 C83,52 83,52 83,52 C89,53 94,58 94,65 C94,72 89,77 82,77 L28,75 Z" fill="url(#cloudGradW)" opacity="0.95"/>
+  <!-- Checkmark circle -->
+  <circle cx="75" cy="62" r="18" fill="url(#checkGradW)" opacity="0.9"/>
+  <!-- Checkmark -->
+  <polyline points="65,62 72,69 85,55" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Text: M365 -->
+  <text x="110" y="55" font-family="Segoe UI, Calibri, Arial, sans-serif" font-weight="700" font-size="36" fill="#FFFFFF">M365</text>
+  <!-- Text: Assess -->
+  <text x="110" y="90" font-family="Segoe UI, Calibri, Arial, sans-serif" font-weight="300" font-size="32" fill="#93C5FD">Assess</text>
+</svg>

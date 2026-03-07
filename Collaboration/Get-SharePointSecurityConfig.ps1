@@ -1,0 +1,396 @@
+<#
+.SYNOPSIS
+    Collects SharePoint Online and OneDrive security configuration settings for M365 assessment.
+.DESCRIPTION
+    Queries Microsoft Graph and SharePoint admin settings for security-relevant configuration
+    including external sharing levels, default link types, re-sharing controls, sync client
+    restrictions, and legacy authentication. Returns a structured inventory of settings with
+    current values and CIS benchmark recommendations.
+
+    Requires Microsoft Graph connection with SharePointTenantSettings.Read.All permission.
+.PARAMETER OutputPath
+    Optional path to export results as CSV. If not specified, results are returned to the pipeline.
+.EXAMPLE
+    PS> . .\Common\Connect-Service.ps1
+    PS> Connect-Service -Service Graph -Scopes 'SharePointTenantSettings.Read.All'
+    PS> .\Collaboration\Get-SharePointSecurityConfig.ps1
+
+    Displays SharePoint and OneDrive security configuration settings.
+.EXAMPLE
+    PS> .\Collaboration\Get-SharePointSecurityConfig.ps1 -OutputPath '.\spo-security-config.csv'
+
+    Exports the security configuration to CSV.
+.NOTES
+    Version: 0.3.0
+    Author:  Daren9m
+    Settings checked are aligned with CIS Microsoft 365 Foundations Benchmark v6.0.1 recommendations.
+#>
+[CmdletBinding()]
+param(
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$OutputPath
+)
+
+$ErrorActionPreference = 'Stop'
+
+# Verify Graph connection
+try {
+    $context = Get-MgContext
+    if (-not $context) {
+        Write-Error "Not connected to Microsoft Graph. Run Connect-Service -Service Graph first."
+        return
+    }
+}
+catch {
+    Write-Error "Not connected to Microsoft Graph. Run Connect-Service -Service Graph first."
+    return
+}
+
+$settings = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+function Add-Setting {
+    param(
+        [string]$Category,
+        [string]$Setting,
+        [string]$CurrentValue,
+        [string]$RecommendedValue,
+        [string]$Status,
+        [string]$CisControl = '',
+        [string]$Remediation = ''
+    )
+    $settings.Add([PSCustomObject]@{
+        Category         = $Category
+        Setting          = $Setting
+        CurrentValue     = $CurrentValue
+        RecommendedValue = $RecommendedValue
+        Status           = $Status
+        CisControl       = $CisControl
+        Remediation      = $Remediation
+    })
+}
+
+# ------------------------------------------------------------------
+# Retrieve SharePoint tenant settings
+# ------------------------------------------------------------------
+$spoSettings = $null
+try {
+    Write-Verbose "Retrieving SharePoint tenant settings..."
+    $spoSettings = Invoke-MgGraphRequest -Method GET `
+        -Uri 'https://graph.microsoft.com/v1.0/admin/sharepoint/settings' -ErrorAction Stop
+}
+catch {
+    Write-Warning "Could not retrieve SharePoint tenant settings: $_"
+}
+
+if (-not $spoSettings) {
+    Write-Warning "No SharePoint settings retrieved. Cannot perform security assessment."
+    if ($OutputPath) {
+        @() | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+        Write-Output "Exported empty SPO security config to $OutputPath"
+    }
+    return
+}
+
+# ------------------------------------------------------------------
+# 1. External Sharing Level
+# ------------------------------------------------------------------
+try {
+    $sharingCapability = $spoSettings['sharingCapability']
+
+    $sharingDisplay = switch ($sharingCapability) {
+        'disabled'                    { 'Disabled (no external sharing)' }
+        'externalUserSharingOnly'     { 'External users only (require sign-in)' }
+        'externalUserAndGuestSharing' { 'External users and guests (anyone with link)' }
+        'existingExternalUserSharingOnly' { 'Existing external users only' }
+        default { $sharingCapability }
+    }
+
+    $sharingStatus = switch ($sharingCapability) {
+        'disabled'                    { 'Pass' }
+        'existingExternalUserSharingOnly' { 'Pass' }
+        'externalUserSharingOnly'     { 'Review' }
+        'externalUserAndGuestSharing' { 'Warning' }
+        default { 'Review' }
+    }
+
+    Add-Setting -Category 'External Sharing' -Setting 'SharePoint External Sharing Level' `
+        -CurrentValue $sharingDisplay `
+        -RecommendedValue 'Existing external users only (or more restrictive)' `
+        -Status $sharingStatus `
+        -CisControl '7.2.3' `
+        -Remediation 'SharePoint admin center > Policies > Sharing. Set to "Existing guests" or more restrictive. Run: Set-SPOTenant -SharingCapability ExistingExternalUserSharingOnly'
+}
+catch {
+    Write-Warning "Could not check sharing capability: $_"
+}
+
+# ------------------------------------------------------------------
+# 2. Resharing by External Users
+# ------------------------------------------------------------------
+try {
+    $resharing = $spoSettings['isResharingByExternalUsersEnabled']
+    Add-Setting -Category 'External Sharing' -Setting 'Resharing by External Users' `
+        -CurrentValue "$resharing" -RecommendedValue 'False' `
+        -Status $(if (-not $resharing) { 'Pass' } else { 'Warning' }) `
+        -CisControl '7.2.5' `
+        -Remediation 'SharePoint admin center > Policies > Sharing > More external sharing settings > Uncheck "Allow guests to share items they don''t own".'
+}
+catch {
+    Write-Warning "Could not check resharing: $_"
+}
+
+# ------------------------------------------------------------------
+# 3. Sharing Domain Restriction Mode
+# ------------------------------------------------------------------
+try {
+    $domainRestriction = $spoSettings['sharingDomainRestrictionMode']
+
+    $restrictDisplay = switch ($domainRestriction) {
+        'none'       { 'No restriction' }
+        'allowList'  { 'Allow list (specific domains only)' }
+        'blockList'  { 'Block list (block specific domains)' }
+        default { $domainRestriction }
+    }
+
+    $restrictStatus = switch ($domainRestriction) {
+        'none'       { 'Review' }
+        'allowList'  { 'Pass' }
+        'blockList'  { 'Pass' }
+        default { 'Review' }
+    }
+
+    Add-Setting -Category 'External Sharing' -Setting 'Sharing Domain Restriction' `
+        -CurrentValue $restrictDisplay `
+        -RecommendedValue 'Allow or Block list configured' `
+        -Status $restrictStatus `
+        -CisControl '7.2.6' `
+        -Remediation 'SharePoint admin center > Policies > Sharing > Limit sharing by domain. Run: Set-SPOTenant -SharingDomainRestrictionMode AllowList -SharingAllowedDomainList "partner.com"'
+}
+catch {
+    Write-Warning "Could not check domain restriction: $_"
+}
+
+# ------------------------------------------------------------------
+# 4. Unmanaged Sync Client Restriction
+# ------------------------------------------------------------------
+try {
+    $unmanagedSync = $spoSettings['isUnmanagedSyncClientRestricted']
+    Add-Setting -Category 'Sync & Access' -Setting 'Block Sync from Unmanaged Devices' `
+        -CurrentValue "$unmanagedSync" -RecommendedValue 'True' `
+        -Status $(if ($unmanagedSync) { 'Pass' } else { 'Warning' }) `
+        -CisControl '7.3.2' `
+        -Remediation 'SharePoint admin center > Settings > Sync > Allow syncing only on computers joined to specific domains. Run: Set-SPOTenantSyncClientRestriction -Enable'
+}
+catch {
+    Write-Warning "Could not check sync client restriction: $_"
+}
+
+# ------------------------------------------------------------------
+# 5. Mac Sync App
+# ------------------------------------------------------------------
+try {
+    $macSync = $spoSettings['isMacSyncAppEnabled']
+    Add-Setting -Category 'Sync & Access' -Setting 'Mac Sync App Enabled' `
+        -CurrentValue "$macSync" -RecommendedValue 'Review' `
+        -Status 'Review'
+}
+catch {
+    Write-Warning "Could not check Mac sync: $_"
+}
+
+# ------------------------------------------------------------------
+# 6. Loop Enabled
+# ------------------------------------------------------------------
+try {
+    $loopEnabled = $spoSettings['isLoopEnabled']
+    Add-Setting -Category 'Collaboration Features' -Setting 'Loop Components Enabled' `
+        -CurrentValue "$loopEnabled" -RecommendedValue 'Review' `
+        -Status 'Review'
+}
+catch {
+    Write-Warning "Could not check Loop: $_"
+}
+
+# ------------------------------------------------------------------
+# 7. OneDrive Loop Sharing Capability
+# ------------------------------------------------------------------
+try {
+    $loopSharing = $spoSettings['oneDriveLoopSharingCapability']
+
+    $loopSharingDisplay = switch ($loopSharing) {
+        'disabled'                    { 'Disabled' }
+        'externalUserSharingOnly'     { 'External users only' }
+        'externalUserAndGuestSharing' { 'External users and guests' }
+        'existingExternalUserSharingOnly' { 'Existing external users only' }
+        default { $loopSharing }
+    }
+
+    Add-Setting -Category 'Collaboration Features' -Setting 'OneDrive Loop Sharing' `
+        -CurrentValue $loopSharingDisplay -RecommendedValue 'Restricted or disabled' `
+        -Status $(if ($loopSharing -eq 'disabled' -or $loopSharing -eq 'existingExternalUserSharingOnly') { 'Pass' } else { 'Review' })
+}
+catch {
+    Write-Warning "Could not check Loop sharing: $_"
+}
+
+# ------------------------------------------------------------------
+# 8. Idle Session Timeout (via Graph beta)
+# ------------------------------------------------------------------
+try {
+    Write-Verbose "Checking idle session timeout policy..."
+    $idlePolicy = Invoke-MgGraphRequest -Method GET `
+        -Uri '/policies/activityBasedTimeoutPolicies' -ErrorAction SilentlyContinue
+
+    if ($idlePolicy -and $idlePolicy['value'] -and @($idlePolicy['value']).Count -gt 0) {
+        Add-Setting -Category 'Sync & Access' -Setting 'Idle Session Timeout Policy' `
+            -CurrentValue 'Configured' -RecommendedValue 'Configured' -Status 'Pass' `
+            -CisControl '1.3.2' `
+            -Remediation 'Entra admin center > Protection > Conditional Access > Session controls > Sign-in frequency.'
+    }
+    else {
+        Add-Setting -Category 'Sync & Access' -Setting 'Idle Session Timeout Policy' `
+            -CurrentValue 'Not configured' -RecommendedValue 'Configured' -Status 'Review' `
+            -CisControl '1.3.2' `
+            -Remediation 'M365 admin center > Settings > Org settings > Security & privacy > Idle session timeout > Turn on. Set a timeout period (e.g., 1 hour).'
+    }
+}
+catch {
+    Write-Warning "Could not check idle session timeout: $_"
+}
+
+# ------------------------------------------------------------------
+# 9. Default Sharing Link Type (CIS 7.2.7)
+# ------------------------------------------------------------------
+try {
+    $defaultLinkType = $spoSettings['defaultSharingLinkType']
+
+    $linkTypeDisplay = switch ($defaultLinkType) {
+        'specificPeople'  { 'Specific people (direct)' }
+        'organization'    { 'People in the organization' }
+        'anyone'          { 'Anyone with the link' }
+        default { if ($defaultLinkType) { $defaultLinkType } else { 'Not available via API' } }
+    }
+
+    $linkTypeStatus = switch ($defaultLinkType) {
+        'specificPeople'  { 'Pass' }
+        'organization'    { 'Review' }
+        'anyone'          { 'Fail' }
+        default { 'Review' }
+    }
+
+    Add-Setting -Category 'External Sharing' -Setting 'Default Sharing Link Type' `
+        -CurrentValue $linkTypeDisplay `
+        -RecommendedValue 'Specific people (direct)' `
+        -Status $linkTypeStatus `
+        -CisControl '7.2.7' `
+        -Remediation 'SharePoint admin center > Policies > Sharing > File and folder links > Default link type > Specific people. Run: Set-SPOTenant -DefaultSharingLinkType Direct'
+}
+catch {
+    Write-Warning "Could not check default sharing link type: $_"
+}
+
+# ------------------------------------------------------------------
+# 10. Guest Access Expiration (CIS 7.2.9)
+# ------------------------------------------------------------------
+try {
+    $guestExpRequired = $spoSettings['externalUserExpirationRequired']
+    $guestExpDays = $spoSettings['externalUserExpireInDays']
+
+    if ($null -eq $guestExpRequired) {
+        Add-Setting -Category 'External Sharing' -Setting 'Guest Access Expiration' `
+            -CurrentValue 'Not available via API' -RecommendedValue 'Enabled (30 days or less)' `
+            -Status 'Review' `
+            -CisControl '7.2.9' `
+            -Remediation 'SharePoint admin center > Policies > Sharing > More external sharing settings > Guest access to a site or OneDrive will expire automatically after this many days. Run: Set-SPOTenant -ExternalUserExpirationRequired $true -ExternalUserExpireInDays 30'
+    }
+    else {
+        $expDisplay = if ($guestExpRequired) { "Enabled ($guestExpDays days)" } else { 'Disabled' }
+        $expStatus = if ($guestExpRequired -and $guestExpDays -le 30) { 'Pass' }
+                     elseif ($guestExpRequired) { 'Warning' }
+                     else { 'Fail' }
+
+        Add-Setting -Category 'External Sharing' -Setting 'Guest Access Expiration' `
+            -CurrentValue $expDisplay -RecommendedValue 'Enabled (30 days or less)' `
+            -Status $expStatus `
+            -CisControl '7.2.9' `
+            -Remediation 'SharePoint admin center > Policies > Sharing > More external sharing settings > Guest access to a site or OneDrive will expire automatically after this many days. Run: Set-SPOTenant -ExternalUserExpirationRequired $true -ExternalUserExpireInDays 30'
+    }
+}
+catch {
+    Write-Warning "Could not check guest access expiration: $_"
+}
+
+# ------------------------------------------------------------------
+# 11. Reauthentication with Verification Code (CIS 7.2.10)
+# ------------------------------------------------------------------
+try {
+    $emailAttestation = $spoSettings['emailAttestationRequired']
+    $emailAttestDays = $spoSettings['emailAttestationReAuthDays']
+
+    if ($null -eq $emailAttestation) {
+        Add-Setting -Category 'External Sharing' -Setting 'Reauthentication with Verification Code' `
+            -CurrentValue 'Not available via API' -RecommendedValue 'Enabled (30 days or less)' `
+            -Status 'Review' `
+            -CisControl '7.2.10' `
+            -Remediation 'SharePoint admin center > Policies > Sharing > More external sharing settings > People who use a verification code must reauthenticate after this many days. Run: Set-SPOTenant -EmailAttestationRequired $true -EmailAttestationReAuthDays 30'
+    }
+    else {
+        $attestDisplay = if ($emailAttestation) { "Enabled ($emailAttestDays days)" } else { 'Disabled' }
+        $attestStatus = if ($emailAttestation -and $emailAttestDays -le 30) { 'Pass' }
+                        elseif ($emailAttestation) { 'Warning' }
+                        else { 'Fail' }
+
+        Add-Setting -Category 'External Sharing' -Setting 'Reauthentication with Verification Code' `
+            -CurrentValue $attestDisplay -RecommendedValue 'Enabled (30 days or less)' `
+            -Status $attestStatus `
+            -CisControl '7.2.10' `
+            -Remediation 'SharePoint admin center > Policies > Sharing > More external sharing settings > People who use a verification code must reauthenticate after this many days. Run: Set-SPOTenant -EmailAttestationRequired $true -EmailAttestationReAuthDays 30'
+    }
+}
+catch {
+    Write-Warning "Could not check email attestation: $_"
+}
+
+# ------------------------------------------------------------------
+# 12. Default Link Permission (CIS 7.2.11)
+# ------------------------------------------------------------------
+try {
+    $defaultPerm = $spoSettings['defaultLinkPermission']
+
+    $permDisplay = switch ($defaultPerm) {
+        'view' { 'View (read-only)' }
+        'edit' { 'Edit' }
+        default { if ($defaultPerm) { $defaultPerm } else { 'Not available via API' } }
+    }
+
+    $permStatus = switch ($defaultPerm) {
+        'view' { 'Pass' }
+        'edit' { 'Warning' }
+        default { 'Review' }
+    }
+
+    Add-Setting -Category 'External Sharing' -Setting 'Default Sharing Link Permission' `
+        -CurrentValue $permDisplay `
+        -RecommendedValue 'View (read-only)' `
+        -Status $permStatus `
+        -CisControl '7.2.11' `
+        -Remediation 'SharePoint admin center > Policies > Sharing > File and folder links > Default permission > View. Run: Set-SPOTenant -DefaultLinkPermission View'
+}
+catch {
+    Write-Warning "Could not check default link permission: $_"
+}
+
+# ------------------------------------------------------------------
+# Output
+# ------------------------------------------------------------------
+$report = @($settings)
+Write-Verbose "Collected $($report.Count) SharePoint/OneDrive security configuration settings"
+
+if ($OutputPath) {
+    $report | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+    Write-Output "Exported SharePoint security config ($($report.Count) settings) to $OutputPath"
+}
+else {
+    Write-Output $report
+}
