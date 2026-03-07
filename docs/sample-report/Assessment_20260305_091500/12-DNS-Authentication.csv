@@ -1,0 +1,7 @@
+PolicyType,Name,Enabled,KeySettings
+SPF,northwindtraders.com,True,"v=spf1 include:spf.protection.outlook.com include:spf.barracuda.com -all"
+DKIM,northwindtraders.com,True,"selector1._domainkey.northwindtraders.com: CNAME configured; Status: Enabled"
+DMARC,northwindtraders.com,True,"v=DMARC1; p=quarantine; rua=mailto:dmarc@northwindtraders.com; pct=100"
+SPF,mail.northwindtraders.com,True,"v=spf1 include:spf.protection.outlook.com -all"
+DKIM,mail.northwindtraders.com,False,"DKIM signing not enabled for secondary domain"
+DMARC,mail.northwindtraders.com,False,"No DMARC record found"
