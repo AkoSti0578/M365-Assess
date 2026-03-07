@@ -41,6 +41,41 @@ cd M365-Assess
 Get-ChildItem .\M365-Assessment\Assessment_* -Directory | Sort-Object Name -Descending | Select-Object -First 1
 ```
 
+## Interactive Console App
+
+Running the orchestrator with no parameters launches a full interactive wizard:
+
+```powershell
+.\Invoke-M365Assessment.ps1
+```
+
+The console app walks you through four steps:
+
+1. **Select sections** — toggle assessment sections on/off (Tenant, Identity, Email, etc.)
+2. **Tenant ID** — enter your tenant ID or `*.onmicrosoft.com` domain
+3. **Authentication** — choose Interactive, Certificate-based, or Skip (pre-existing connections)
+4. **Output folder** — confirm or change the output directory
+
+```
+      ███╗   ███╗ ██████╗  ██████╗ ███████╗
+      ████╗ ████║ ╚════██╗ ██╔════╝ ██╔════╝
+      ██╔████╔██║  █████╔╝ ██████╗  ███████╗
+      ██║╚██╔╝██║  ╚═══██╗ ██╔══██╗ ╚════██║
+      ██║ ╚═╝ ██║ ██████╔╝ ╚█████╔╝ ███████║
+      ╚═╝     ╚═╝ ╚═════╝   ╚════╝  ╚══════╝
+       █████╗ ███████╗███████╗███████╗███████╗███████╗
+      ██╔══██╗██╔════╝██╔════╝██╔════╝██╔════╝██╔════╝
+      ███████║███████╗███████╗█████╗  ███████╗███████╗
+      ██╔══██║╚════██║╚════██║██╔══╝  ╚════██║╚════██║
+      ██║  ██║███████║███████║███████╗███████║███████║
+      ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚══════╝╚══════╝
+
+        ░▒▓█  M365 Environment Assessment  █▓▒░
+        ░▒▓█  by  D A R E N 9 M            █▓▒░
+```
+
+During execution, the console displays real-time progress with status indicators for each collector (`✓` complete, `○` skipped, `✗` failed) plus item counts and timing. The completion banner summarizes results and links to the HTML report.
+
 ## Prerequisites
 
 | Requirement | Details |

@@ -151,10 +151,22 @@ function Show-InteractiveWizard {
     function Show-Header {
         Clear-Host
         Write-Host ''
-        Write-Host '  ╔══════════════════════════════════════════════════════════╗' -ForegroundColor $cBorder
-        Write-Host '  ║             M365 Environment Assessment                  ║' -ForegroundColor $cBorder
-        Write-Host '  ║             M365 Assess — by Daren9m                      ║' -ForegroundColor $cBorder
-        Write-Host '  ╚══════════════════════════════════════════════════════════╝' -ForegroundColor $cBorder
+        Write-Host '      ███╗   ███╗ ██████╗  ██████╗ ███████╗' -ForegroundColor Cyan
+        Write-Host '      ████╗ ████║ ╚════██╗ ██╔════╝ ██╔════╝' -ForegroundColor Cyan
+        Write-Host '      ██╔████╔██║  █████╔╝ ██████╗  ███████╗' -ForegroundColor Cyan
+        Write-Host '      ██║╚██╔╝██║  ╚═══██╗ ██╔══██╗ ╚════██║' -ForegroundColor Cyan
+        Write-Host '      ██║ ╚═╝ ██║ ██████╔╝ ╚█████╔╝ ███████║' -ForegroundColor Cyan
+        Write-Host '      ╚═╝     ╚═╝ ╚═════╝   ╚════╝  ╚══════╝' -ForegroundColor Cyan
+        Write-Host '     ─────────────────────────────────────────' -ForegroundColor DarkCyan
+        Write-Host '       █████╗ ███████╗███████╗███████╗███████╗███████╗' -ForegroundColor DarkCyan
+        Write-Host '      ██╔══██╗██╔════╝██╔════╝██╔════╝██╔════╝██╔════╝' -ForegroundColor DarkCyan
+        Write-Host '      ███████║███████╗███████╗█████╗  ███████╗███████╗' -ForegroundColor DarkCyan
+        Write-Host '      ██╔══██║╚════██║╚════██║██╔══╝  ╚════██║╚════██║' -ForegroundColor DarkCyan
+        Write-Host '      ██║  ██║███████║███████║███████╗███████║███████║' -ForegroundColor DarkCyan
+        Write-Host '      ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚══════╝╚══════╝' -ForegroundColor DarkCyan
+        Write-Host ''
+        Write-Host '        ░▒▓█  M365 Environment Assessment  █▓▒░' -ForegroundColor DarkGray
+        Write-Host '        ░▒▓█  by  D A R E N 9 M            █▓▒░' -ForegroundColor DarkCyan
         Write-Host ''
     }
 
@@ -557,20 +569,28 @@ function Show-AssessmentHeader {
     param([string]$TenantName, [string]$OutputPath, [string]$LogPath, [string]$Version)
 
     Write-Host ''
-    Write-Host '  ╔══════════════════════════════════════════════════════════╗' -ForegroundColor Cyan
-    Write-Host '  ║             M365 Environment Assessment                  ║' -ForegroundColor Cyan
+    Write-Host '      ███╗   ███╗ ██████╗  ██████╗ ███████╗' -ForegroundColor Cyan
+    Write-Host '      ████╗ ████║ ╚════██╗ ██╔════╝ ██╔════╝' -ForegroundColor Cyan
+    Write-Host '      ██╔████╔██║  █████╔╝ ██████╗  ███████╗' -ForegroundColor Cyan
+    Write-Host '      ██║╚██╔╝██║  ╚═══██╗ ██╔══██╗ ╚════██║' -ForegroundColor Cyan
+    Write-Host '      ██║ ╚═╝ ██║ ██████╔╝ ╚█████╔╝ ███████║' -ForegroundColor Cyan
+    Write-Host '      ╚═╝     ╚═╝ ╚═════╝   ╚════╝  ╚══════╝' -ForegroundColor Cyan
+    Write-Host '     ─────────────────────────────────────────' -ForegroundColor DarkCyan
+    Write-Host '       █████╗ ███████╗███████╗███████╗███████╗███████╗' -ForegroundColor DarkCyan
+    Write-Host '      ██╔══██╗██╔════╝██╔════╝██╔════╝██╔════╝██╔════╝' -ForegroundColor DarkCyan
+    Write-Host '      ███████║███████╗███████╗█████╗  ███████╗███████╗' -ForegroundColor DarkCyan
+    Write-Host '      ██╔══██║╚════██║╚════██║██╔══╝  ╚════██║╚════██║' -ForegroundColor DarkCyan
+    Write-Host '      ██║  ██║███████║███████║███████╗███████║███████║' -ForegroundColor DarkCyan
+    Write-Host '      ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚══════╝╚══════╝' -ForegroundColor DarkCyan
+    Write-Host ''
     if ($TenantName) {
         $tenantLine = $TenantName
         if ($tenantLine.Length -gt 45) { $tenantLine = $tenantLine.Substring(0, 42) + '...' }
-        $padded = $tenantLine.PadRight(45)
-        Write-Host "  ║  $padded           ║" -ForegroundColor Cyan
+        Write-Host "        ░▒▓█  $tenantLine" -ForegroundColor White
     }
     if ($Version) {
-        $verLine = "v$Version"
-        $verPadded = $verLine.PadRight(45)
-        Write-Host "  ║  $verPadded           ║" -ForegroundColor Cyan
+        Write-Host "        ░▒▓█  v$Version  █▓▒░" -ForegroundColor DarkGray
     }
-    Write-Host '  ╚══════════════════════════════════════════════════════════╝' -ForegroundColor Cyan
     Write-Host ''
     Write-Host "    Output: $OutputPath" -ForegroundColor White
     if ($LogPath) {
@@ -655,9 +675,9 @@ function Show-AssessmentSummary {
     $totalCollectors = $SummaryResults.Count
 
     Write-Host ''
-    Write-Host '  ═════════════════════════════════════════════════════════' -ForegroundColor Cyan
+    Write-Host '  ░▒▓████████████████████████████████████████████████▓▒░' -ForegroundColor Cyan
     Write-Host "    Assessment Complete  $([char]0x00B7)  $($Duration.ToString('mm\:ss')) elapsed" -ForegroundColor Cyan
-    Write-Host '  ═════════════════════════════════════════════════════════' -ForegroundColor Cyan
+    Write-Host '  ░▒▓████████████████████████████████████████████████▓▒░' -ForegroundColor Cyan
     Write-Host ''
     Write-Host "    Sections: $SectionCount    Collectors: $totalCollectors" -ForegroundColor White
 
@@ -707,7 +727,7 @@ function Show-AssessmentSummary {
     if ($Version) {
         Write-Host "    M365 Assessment v$Version" -ForegroundColor DarkGray
     }
-    Write-Host '  ═════════════════════════════════════════════════════════' -ForegroundColor Cyan
+    Write-Host '  ░▒▓████████████████████████████████████████████████▓▒░' -ForegroundColor Cyan
     Write-Host ''
 }
 
