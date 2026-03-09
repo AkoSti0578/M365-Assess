@@ -126,22 +126,32 @@ The orchestrator (`Invoke-M365Assessment.ps1`) connects to the required services
 
 ### Multi-Framework Compliance
 
-By default, findings map to the CIS M365 Benchmark only. Use `-Frameworks` to add cross-reference columns for additional compliance frameworks in the HTML report:
+The HTML report includes a **Compliance Overview** section that maps all assessed security controls across 12 compliance frameworks simultaneously. No parameters needed — all framework data is always included.
 
-```powershell
-# CIS + PCI DSS + HIPAA (healthcare with payment processing)
-.\Invoke-M365Assessment.ps1 -TenantId 'contoso.onmicrosoft.com' -Frameworks CIS,PCI-DSS,HIPAA
+Supported frameworks:
 
-# CIS + NIST 800-53 + CMMC (defense contractor)
-.\Invoke-M365Assessment.ps1 -TenantId 'contoso.onmicrosoft.com' -Frameworks CIS,NIST-800-53,CMMC
+| Framework | Controls | Notes |
+|-----------|----------|-------|
+| CIS M365 E3 Level 1 | 86 | CIS Benchmark v6.0.1 — compliance score |
+| CIS M365 E3 Level 2 | 34 | CIS Benchmark v6.0.1 — compliance score |
+| CIS M365 E5 Level 1 | 97 | CIS Benchmark v6.0.1 — compliance score |
+| CIS M365 E5 Level 2 | 43 | CIS Benchmark v6.0.1 — compliance score |
+| NIST 800-53 Rev 5 | 1,189 | Coverage mapping |
+| NIST CSF 2.0 | 106 | Coverage mapping |
+| ISO 27001:2022 | 93 | Coverage mapping |
+| DISA STIG | 148 | Coverage mapping |
+| PCI DSS v4.0.1 | 64 | Coverage mapping |
+| CMMC 2.0 | 110 | Coverage mapping |
+| HIPAA Security Rule | 45 | Coverage mapping |
+| CISA SCuBA | 80 | Coverage mapping |
 
-# All supported frameworks
-.\Invoke-M365Assessment.ps1 -TenantId 'contoso.onmicrosoft.com' -Frameworks CIS,NIST-CSF,NIST-800-53,ISO-27001,STIG,PCI-DSS,CMMC,HIPAA,CISA-SCuBA
-```
+The report's Compliance Overview provides:
+- **Framework selector** — checkbox controls to toggle which frameworks are visible (all on by default)
+- **Coverage cards** — CIS profiles show compliance score (pass rate); other frameworks show mapped control coverage
+- **Status filter** — filter findings by Pass, Fail, Warning, or Review status
+- **Cross-reference matrix** — every assessed finding with columns for each framework's mapped controls
 
-Supported frameworks: **CIS M365 v6.0.1** (always included), **NIST 800-53 Rev 5**, **NIST CSF 2.0**, **ISO 27001:2022**, **DISA STIG**, **PCI DSS v4.0.1**, **CMMC 2.0**, **HIPAA Security Rule**, **CISA SCuBA**.
-
-When non-CIS frameworks are selected, the HTML report includes a **Security Framework Matrix** section with per-framework coverage cards, a cross-reference table, and filter tabs. Edit `Common/framework-mappings.csv` to customize mappings.
+Edit `Common/framework-mappings.csv` to customize control mappings across frameworks.
 
 ### Output Structure
 
@@ -240,8 +250,7 @@ The assessment automatically generates a self-contained HTML report (`_Assessmen
 - **Section-by-section data tables** with executive descriptions explaining what each area covers and why it matters
 - **Collapsible sub-sections** — detail tables fold under expandable headings with row counts, keeping the report scannable
 - **Sortable column headers** — click any column header to sort ascending/descending
-- **CIS Compliance Summary** — findings mapped to the CIS Microsoft 365 Foundations Benchmark v6.0.1 with compliance score, pass/fail/warning stat cards, and color-coded findings table
-- **Multi-Framework Compliance Matrix** — cross-reference CIS findings against NIST 800-53, NIST CSF 2.0, ISO 27001, DISA STIG, PCI DSS, CMMC, HIPAA, and CISA SCuBA with per-framework coverage cards and filterable tabs (use `-Frameworks` to select)
+- **Compliance Overview** — unified security pane with interactive framework selector, status filter, coverage cards for all 12 frameworks (4 CIS profiles by license/level, NIST 800-53, NIST CSF, ISO 27001, DISA STIG, PCI DSS, CMMC, HIPAA, CISA SCuBA), and cross-reference matrix table
 - **Security config highlighting** — Entra, EXO, Defender, SharePoint, and Teams security config tables show color-coded status badges (Pass/Fail/Warning/Review) with row-level tinting
 - **Microsoft Secure Score** — visual stat cards and progress bar showing current score, points earned, and comparison to the M365 global average
 - **Issues & recommendations** with severity badges and remediation guidance
