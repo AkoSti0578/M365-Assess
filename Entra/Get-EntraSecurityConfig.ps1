@@ -53,6 +53,7 @@ Import-Module -Name Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Si
 Import-Module -Name Microsoft.Graph.Identity.SignIns -ErrorAction SilentlyContinue
 
 $settings = [System.Collections.Generic.List[PSCustomObject]]::new()
+$checkIdCounter = @{}
 
 # Helper to add a setting
 function Add-Setting {
@@ -65,13 +66,20 @@ function Add-Setting {
         [string]$CheckId = '',
         [string]$Remediation = ''
     )
+    # Auto-generate sub-numbered CheckId for individual setting traceability
+    $subCheckId = $CheckId
+    if ($CheckId) {
+        if (-not $checkIdCounter.ContainsKey($CheckId)) { $checkIdCounter[$CheckId] = 0 }
+        $checkIdCounter[$CheckId]++
+        $subCheckId = "$CheckId.$($checkIdCounter[$CheckId])"
+    }
     $settings.Add([PSCustomObject]@{
         Category         = $Category
         Setting          = $Setting
         CurrentValue     = $CurrentValue
         RecommendedValue = $RecommendedValue
         Status           = $Status
-        CheckId          = $CheckId
+        CheckId          = $subCheckId
         Remediation      = $Remediation
     })
     if ($CheckId -and (Get-Command -Name Update-CheckProgress -ErrorAction SilentlyContinue)) {
@@ -95,7 +103,7 @@ try {
 catch {
     Write-Warning "Could not retrieve security defaults: $_"
     Add-Setting -Category 'Security Defaults' -Setting 'Security Defaults Enabled' `
-        -CurrentValue 'Unable to retrieve' -RecommendedValue 'True (if no CA)' -Status 'Unknown' `
+        -CurrentValue 'Unable to retrieve' -RecommendedValue 'True (if no CA)' -Status 'Review' `
         -CheckId 'ENTRA-SECDEFAULT-001' `
         -Remediation 'Run: Update-MgPolicyIdentitySecurityDefaultsEnforcementPolicy -IsEnabled $true. Entra admin center > Properties > Manage security defaults.'
 }

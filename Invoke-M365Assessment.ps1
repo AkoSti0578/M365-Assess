@@ -1,4 +1,3 @@
-#Requires -Version 7.0
 <#
 .SYNOPSIS
     Runs a comprehensive read-only Microsoft 365 environment assessment.
@@ -45,6 +44,10 @@
     Target cloud environment for all service connections. Commercial and GCC
     use standard endpoints. GCCHigh and DoD use sovereign cloud endpoints.
     Auto-detected from tenant metadata when not explicitly specified.
+.PARAMETER SkipDLP
+    Skips the DLP Policies collector and its Purview (Security & Compliance)
+    connection. Purview connection adds ~46 seconds of latency, so use this
+    switch when DLP policy assessment is not needed.
 .EXAMPLE
     PS> .\Invoke-M365Assessment.ps1 -TenantId 'contoso.onmicrosoft.com'
 
@@ -79,6 +82,7 @@
 
     Runs Tenant and Identity sections plus the ScubaGear baseline scan.
 #>
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -116,7 +120,10 @@ param(
     [string]$M365Environment = 'commercial',
 
     [Parameter()]
-    [switch]$NoBranding
+    [switch]$NoBranding,
+
+    [Parameter()]
+    [switch]$SkipDLP
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1349,6 +1356,18 @@ foreach ($sectionName in $Section) {
     }
 
     $collectors = $collectorMap[$sectionName]
+
+    # Skip DLP collector (and its Purview connection overhead) when -SkipDLP is set
+    if ($SkipDLP) {
+        $dlpCollectors = @($collectors | Where-Object { $_.ContainsKey('RequiredServices') -and $_.RequiredServices -contains 'Purview' })
+        if ($dlpCollectors.Count -gt 0) {
+            $collectors = @($collectors | Where-Object { -not ($_.ContainsKey('RequiredServices') -and $_.RequiredServices -contains 'Purview') })
+            foreach ($skipped in $dlpCollectors) {
+                Write-AssessmentLog -Level INFO -Message "Skipped: $($skipped.Label) (-SkipDLP)" -Section $sectionName -Collector $skipped.Label
+            }
+        }
+    }
+
     Show-SectionHeader -Name $sectionName
 
     # Connect to services: use per-collector RequiredServices if defined,
