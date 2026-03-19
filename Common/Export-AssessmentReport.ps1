@@ -28,6 +28,15 @@
     white-labeling reports delivered to clients.
 .PARAMETER SkipPdf
     Skip PDF generation even if wkhtmltopdf is available on the system.
+.PARAMETER SkipComplianceOverview
+    Omit the Compliance Overview section from the report. Useful when running
+    a single section assessment where framework coverage cards are not relevant.
+.PARAMETER SkipCoverPage
+    Omit the branded cover page (logo, tenant name, date, version). The report
+    starts directly at the executive summary or section content.
+.PARAMETER SkipExecutiveSummary
+    Omit the executive summary hero panel (donut chart, metrics, TOC, alert
+    banners). Useful for data-only exports.
 .EXAMPLE
     PS> .\Common\Export-AssessmentReport.ps1 -AssessmentFolder '.\M365-Assessment\Assessment_20260306_195618'
 
@@ -56,7 +65,16 @@ param(
     [switch]$NoBranding,
 
     [Parameter()]
-    [switch]$SkipPdf
+    [switch]$SkipPdf,
+
+    [Parameter()]
+    [switch]$SkipComplianceOverview,
+
+    [Parameter()]
+    [switch]$SkipCoverPage,
+
+    [Parameter()]
+    [switch]$SkipExecutiveSummary
 )
 
 $ErrorActionPreference = 'Stop'
@@ -198,21 +216,37 @@ if ($folderName -match 'Assessment_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})')
 }
 
 # ------------------------------------------------------------------
-# Load and base64-encode logo
+# Load and base64-encode logo and background from Common/assets/
+# Searches by pattern so any logo-*.png/jpeg or wave/bg-*.png works.
 # ------------------------------------------------------------------
-$logoBase64 = ''
-$logoPath = Join-Path -Path $projectRoot -ChildPath 'Common\assets\m365-assess-logo.png'
-if (Test-Path -Path $logoPath) {
-    $logoBytes = [System.IO.File]::ReadAllBytes($logoPath)
-    $logoBase64 = [Convert]::ToBase64String($logoBytes)
+$assetsDir = Join-Path -Path $projectRoot -ChildPath 'Common\assets'
+
+function Get-AssetBase64 {
+    param([string]$Directory, [string[]]$Patterns)
+    foreach ($pattern in $Patterns) {
+        $file = Get-ChildItem -Path $Directory -Filter $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($file) {
+            $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+            $ext = $file.Extension.TrimStart('.').ToLower()
+            $mime = switch ($ext) {
+                'jpg'  { 'image/jpeg' }
+                'jpeg' { 'image/jpeg' }
+                'svg'  { 'image/svg+xml' }
+                default { 'image/png' }
+            }
+            return @{ Base64 = [Convert]::ToBase64String($bytes); Mime = $mime }
+        }
+    }
+    return $null
 }
 
-$waveBase64 = ''
-$wavePath = Join-Path -Path $projectRoot -ChildPath 'Common\assets\m365-assess-bg.png'
-if (Test-Path -Path $wavePath) {
-    $waveBytes = [System.IO.File]::ReadAllBytes($wavePath)
-    $waveBase64 = [Convert]::ToBase64String($waveBytes)
-}
+$logoAsset = Get-AssetBase64 -Directory $assetsDir -Patterns @('*logo-white*', '*logo*')
+$logoBase64 = if ($logoAsset) { $logoAsset.Base64 } else { '' }
+$logoMime   = if ($logoAsset) { $logoAsset.Mime }   else { 'image/png' }
+
+$waveAsset = Get-AssetBase64 -Directory $assetsDir -Patterns @('*wave*', '*bg*')
+$waveBase64 = if ($waveAsset) { $waveAsset.Base64 } else { '' }
+$waveMime   = if ($waveAsset) { $waveAsset.Mime }   else { 'image/png' }
 
 # ------------------------------------------------------------------
 # Compute summary statistics
@@ -1746,7 +1780,7 @@ foreach ($c in $summary) {
     }
 }
 
-if ($allCisFindings.Count -gt 0 -and $controlRegistry.Count -gt 0) {
+if ($allCisFindings.Count -gt 0 -and $controlRegistry.Count -gt 0 -and -not $SkipComplianceOverview) {
 
     # Load framework catalog CSVs to get total control counts
     $catalogCounts = @{}
@@ -2030,7 +2064,7 @@ if ($issues.Count -gt 0) {
 }
 
 # Append conditional entries to TOC now that compliance/issues counts are known
-if ($allCisFindings.Count -gt 0 -and $controlRegistry.Count -gt 0) {
+if ($allCisFindings.Count -gt 0 -and $controlRegistry.Count -gt 0 -and -not $SkipComplianceOverview) {
     $null = $tocHtml.AppendLine("<li><a href='#compliance-overview'>Compliance Overview</a></li>")
 }
 if ($issues.Count -gt 0) {
@@ -2043,13 +2077,13 @@ $null = $tocHtml.AppendLine("</nav>")
 # Assemble full HTML document
 # ------------------------------------------------------------------
 $coverBgStyle = if ($waveBase64) {
-    "background-image: url('data:image/png;base64,$waveBase64'); background-size: cover; background-position: center;"
+    "background-image: url('data:$waveMime;base64,$waveBase64'); background-size: cover; background-position: center;"
 } else {
     'background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);'
 }
 
 $logoImgTag = if ($logoBase64) {
-    "<img src='data:image/png;base64,$logoBase64' alt='M365 Assess' class='cover-logo' />"
+    "<img src='data:$logoMime;base64,$logoBase64' alt='M365 Assess' class='cover-logo' />"
 } else {
     "<div class='cover-logo-text'>M365 Assess</div>"
 }
@@ -3369,6 +3403,16 @@ $html = @"
         .cis-row-info { border-left: 3px solid var(--m365a-neutral); background-color: var(--m365a-neutral-bg); }
         .cis-row-unknown { border-left: 3px solid var(--m365a-medium-gray); background-color: var(--m365a-light-gray); }
 
+        /* Zebra striping for security config tables — subtle overlay on status colors */
+        .cis-row-pass:nth-child(even),
+        .cis-row-fail:nth-child(even),
+        .cis-row-warning:nth-child(even),
+        .cis-row-review:nth-child(even),
+        .cis-row-info:nth-child(even),
+        .cis-row-unknown:nth-child(even) {
+            background-image: linear-gradient(rgba(0,0,0,0.06), rgba(0,0,0,0.06));
+        }
+
         /* Framework cross-reference tags */
         .framework-refs { white-space: normal; max-width: 260px; }
         .fw-tag { display: inline-block; padding: 1px 5px; margin: 1px; border-radius: 3px; font-size: 0.72em; font-family: 'Consolas', 'Courier New', monospace; }
@@ -3432,7 +3476,38 @@ $html = @"
         .section-checkbox input[type="checkbox"] { display: none; }
         .no-results { text-align: center; padding: 40px; color: var(--m365a-medium-gray); font-style: italic; }
 
-        /* Expand/Collapse all buttons */
+        /* Compact scan header (shown when exec summary is skipped) */
+        .scan-header {
+            background: var(--m365a-card-bg); border: 1px solid var(--m365a-border);
+            border-radius: 8px; padding: 16px 20px; margin-bottom: 16px;
+        }
+        .scan-header-title { font-size: 1.3em; font-weight: 600; color: var(--m365a-text); }
+        .scan-header-meta {
+            display: flex; flex-wrap: wrap; gap: 6px 16px;
+            margin-top: 6px; font-size: 0.88em; color: var(--m365a-medium-gray);
+        }
+        .scan-header-meta span:not(:last-child)::after {
+            content: '\00b7'; margin-left: 16px; color: var(--m365a-border);
+        }
+        .scan-header-sections {
+            margin-top: 8px; font-size: 0.82em; color: var(--m365a-medium-gray);
+        }
+
+        /* Global expand/collapse controls */
+        .report-controls {
+            display: flex; gap: 8px; justify-content: flex-end;
+            position: sticky; top: 0; z-index: 50;
+            padding: 8px 12px; margin: 0 -20px 12px -20px;
+            background: var(--m365a-card-bg); border-bottom: 1px solid var(--m365a-border);
+        }
+        .report-ctrl-btn {
+            padding: 5px 14px; border: 1px solid var(--m365a-border); border-radius: 4px;
+            background: var(--m365a-bg); cursor: pointer; font-size: 0.82em;
+            color: var(--m365a-text); transition: background 0.15s;
+        }
+        .report-ctrl-btn:hover { background: var(--m365a-hover-bg); }
+
+        /* Per-section expand/collapse buttons */
         .matrix-controls { display: flex; gap: 6px; margin: 8px 0; }
 
         /* Matrix table */
@@ -3674,6 +3749,7 @@ $html = @"
             .data-table th::after { display: none; }
             .data-table { page-break-inside: auto; }
             tr { page-break-inside: avoid; }
+            .report-controls { display: none; }
             .fw-selector { display: none; }
             .status-filter { display: none; }
             .section-filter { display: none; }
@@ -3709,6 +3785,8 @@ $html = @"
         <span class="theme-icon-dark">&#9790;</span>
     </button>
 
+$(if (-not $SkipCoverPage) {
+@"
     <!-- Cover Page -->
     <header class="cover-page">
         $logoImgTag
@@ -3729,9 +3807,36 @@ $(if (-not $NoBranding) {
 '@
 })
     </header>
+"@
+})
 
     <!-- Content -->
     <main class="content">
+"@
+
+if (-not $SkipExecutiveSummary) {
+    $completePct = if ($totalCollectors -gt 0) { [math]::Round(($completeCount / $totalCollectors) * 100, 0) } else { 0 }
+    $donutClass = if ($completePct -ge 90) { 'success' } elseif ($completePct -ge 70) { 'warning' } else { 'danger' }
+    $donutSvg = Get-SvgDonut -Percentage $completePct -CssClass $donutClass -Label "$completeCount/$totalCollectors" -Size 120 -StrokeWidth 10
+    $tocItems = foreach ($tocSection in $sections) {
+        if ($tocSection -eq 'Tenant') {
+            "<li><a href='#section-tenant'>Organization Profile</a></li>"
+        } else {
+            $tocId = ($tocSection -replace '[^a-zA-Z0-9]', '-').ToLower()
+            $tocLabel = [System.Web.HttpUtility]::HtmlEncode($tocSection)
+            "<li><a href='#section-$tocId'>$tocLabel</a></li>"
+        }
+    }
+    if ($allCisFindings.Count -gt 0 -and $controlRegistry.Count -gt 0 -and -not $SkipComplianceOverview) {
+        $tocItems += "<li><a href='#compliance-overview'>Compliance Overview</a></li>"
+    }
+    if ($issues.Count -gt 0) {
+        $tocItems += "<li><a href='#issues'>Technical Issues</a></li>"
+    }
+    $tocHtmlBlock = $tocItems -join "`n                    "
+
+    $html += @"
+
         <!-- Executive Summary — Hero Panel -->
         <div class="exec-hero">
             <div class="exec-hero-left">
@@ -3740,11 +3845,7 @@ $(if (-not $NoBranding) {
                 <strong>$(ConvertTo-HtmlSafe -Text $TenantName)</strong> conducted on
                 <strong>$assessmentDate</strong>.</p>
                 <div class="exec-hero-donut">
-                    $(
-                        $completePct = if ($totalCollectors -gt 0) { [math]::Round(($completeCount / $totalCollectors) * 100, 0) } else { 0 }
-                        $donutClass = if ($completePct -ge 90) { 'success' } elseif ($completePct -ge 70) { 'warning' } else { 'danger' }
-                        Get-SvgDonut -Percentage $completePct -CssClass $donutClass -Label "$completeCount/$totalCollectors" -Size 120 -StrokeWidth 10
-                    )
+                    $donutSvg
                     <div class="exec-hero-stats">
                         <div class="exec-hero-stat"><span class="chart-legend-dot dot-success"></span><strong>$completeCount</strong> Completed</div>
                         <div class="exec-hero-stat"><span class="chart-legend-dot dot-warning"></span><strong>$skippedCount</strong> Skipped</div>
@@ -3775,42 +3876,55 @@ $(if (-not $NoBranding) {
             <div class="exec-hero-right">
                 <div class="exec-hero-toc-label">Sections</div>
                 <ol class="exec-hero-toc">
-                    $( foreach ($tocSection in $sections) {
-                        if ($tocSection -eq 'Tenant') {
-                            "<li><a href='#section-tenant'>Organization Profile</a></li>`n"
-                        } else {
-                            $tocId = ($tocSection -replace '[^a-zA-Z0-9]', '-').ToLower()
-                            $tocLabel = [System.Web.HttpUtility]::HtmlEncode($tocSection)
-                            "<li><a href='#section-$tocId'>$tocLabel</a></li>`n"
-                        }
-                    })
-                    $( if ($allCisFindings.Count -gt 0 -and $controlRegistry.Count -gt 0) { "<li><a href='#compliance-overview'>Compliance Overview</a></li>`n" })
-                    $( if ($issues.Count -gt 0) { "<li><a href='#issues'>Technical Issues</a></li>`n" })
+                    $tocHtmlBlock
                 </ol>
             </div>
         </div>
 "@
 
-if ($issues.Count -gt 0) {
-    $html += @"
+    if ($issues.Count -gt 0) {
+        $html += @"
 
         <div class="exec-alert exec-alert-warn">&#9888; <strong>$($issues.Count) issue(s)</strong> identified:
         $errorCount error(s) and $warningCount warning(s). See <a href="#issues">Technical Issues</a>.</div>
 "@
-}
+    }
 
-if ($allCisFindings.Count -gt 0) {
-    $nonPassingCount = @($allCisFindings | Where-Object { $_.Status -ne 'Pass' }).Count
-    if ($nonPassingCount -gt 0) {
-        $html += @"
+    if ($allCisFindings.Count -gt 0 -and -not $SkipComplianceOverview) {
+        $nonPassingCount = @($allCisFindings | Where-Object { $_.Status -ne 'Pass' }).Count
+        if ($nonPassingCount -gt 0) {
+            $html += @"
 
         <div class="exec-alert exec-alert-info">&#128270; <strong>$nonPassingCount finding(s)</strong> across
         $($allCisFindings.Count) controls require attention. See <a href="#compliance-overview">Compliance Overview</a>.</div>
 "@
+        }
     }
+}
+else {
+    # Compact scan header when executive summary is skipped
+    $scanSections = ($sections | ForEach-Object { [System.Web.HttpUtility]::HtmlEncode($_) }) -join ', '
+    $html += @"
+
+        <div class="scan-header">
+            <div class="scan-header-title">$(ConvertTo-HtmlSafe -Text $TenantName)</div>
+            <div class="scan-header-meta">
+                <span>$assessmentDate</span>
+                <span>v$assessmentVersion</span>
+                <span>$cloudDisplayName</span>
+                <span>$completeCount / $totalCollectors collectors</span>
+            </div>
+            <div class="scan-header-sections">$scanSections</div>
+        </div>
+"@
 }
 
 $html += @"
+
+        <div class="report-controls" id="reportControls">
+            <button type="button" id="expandAllGlobal" class="report-ctrl-btn" title="Expand all sections and tables">&#9660; Expand All</button>
+            <button type="button" id="collapseAllGlobal" class="report-ctrl-btn" title="Collapse all sections and tables">&#9650; Collapse All</button>
+        </div>
 
         $($sectionHtml.ToString())
 "@
@@ -3895,7 +4009,9 @@ $html += @"
             function applyAllFilters() {
                 var activeFw = getActive(fwCbs, '.fw-checkbox');
                 var activeStatus = getActive(statusCbs, '.status-checkbox');
-                var activeSections = getActive(sectionCbs, '.section-checkbox');
+                var activeSections = sectionCbs.length > 0
+                    ? getActive(sectionCbs, '.section-checkbox')
+                    : Array.from(new Set(Array.from(compRows).map(function(r) { return r.getAttribute('data-section') || ''; })));
 
                 // 1. Toggle framework columns and cards
                 allFwCols.forEach(function(el) {
@@ -4067,6 +4183,20 @@ $html += @"
                 }
             });
         });
+
+        // --- Global Expand/Collapse All ---
+        var expandAllGlobal = document.getElementById('expandAllGlobal');
+        var collapseAllGlobal = document.getElementById('collapseAllGlobal');
+        if (expandAllGlobal) {
+            expandAllGlobal.addEventListener('click', function() {
+                document.querySelectorAll('details').forEach(function(d) { d.open = true; });
+            });
+        }
+        if (collapseAllGlobal) {
+            collapseAllGlobal.addEventListener('click', function() {
+                document.querySelectorAll('details').forEach(function(d) { d.open = false; });
+            });
+        }
 
         // --- Table-level status filters (security config tables) ---
         document.querySelectorAll('.table-status-filter').forEach(function(filterBar) {

@@ -56,6 +56,14 @@
     Skips the DLP Policies collector and its Purview (Security & Compliance)
     connection. Purview connection adds ~46 seconds of latency, so use this
     switch when DLP policy assessment is not needed.
+.PARAMETER SkipComplianceOverview
+    Omit the Compliance Overview section from the HTML report. Useful when
+    running a single section assessment where framework coverage cards are
+    not relevant.
+.PARAMETER SkipCoverPage
+    Omit the branded cover page from the HTML report.
+.PARAMETER SkipExecutiveSummary
+    Omit the executive summary hero panel from the HTML report.
 .EXAMPLE
     PS> .\Invoke-M365Assessment.ps1 -TenantId 'contoso.onmicrosoft.com'
 
@@ -137,7 +145,16 @@ param(
     [switch]$NoBranding,
 
     [Parameter()]
-    [switch]$SkipDLP
+    [switch]$SkipDLP,
+
+    [Parameter()]
+    [switch]$SkipComplianceOverview,
+
+    [Parameter()]
+    [switch]$SkipCoverPage,
+
+    [Parameter()]
+    [switch]$SkipExecutiveSummary
 )
 
 $ErrorActionPreference = 'Stop'
@@ -160,7 +177,10 @@ function Show-InteractiveWizard {
         folder. Returns a hashtable of parameter values to drive the assessment.
     #>
     [CmdletBinding()]
-    param()
+    param(
+        [string[]]$PreSelectedSections,
+        [string]$PreSelectedOutputFolder
+    )
 
     # Colorblind-friendly palette
     $cBorder  = 'Cyan'
@@ -207,7 +227,7 @@ function Show-InteractiveWizard {
         Write-Host '      ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚══════╝╚══════╝' -ForegroundColor DarkCyan
         Write-Host ''
         Write-Host '        ░▒▓█  M365 Environment Assessment  █▓▒░' -ForegroundColor DarkGray
-        Write-Host '        ░▒▓█  by  D A R E N 9 M            █▓▒░' -ForegroundColor DarkCyan
+        Write-Host '        ░▒▓█  by  G A L V N Y Z             █▓▒░' -ForegroundColor DarkCyan
         Write-Host ''
     }
 
@@ -218,96 +238,108 @@ function Show-InteractiveWizard {
         Write-Host ''
     }
 
+    # Determine which steps to show and compute dynamic numbering
+    $skipSections = $PreSelectedSections.Count -gt 0
+    $skipOutput   = $PreSelectedOutputFolder -ne ''
+    $totalSteps   = 3  # Tenant + Auth + Confirmation are always shown
+    if (-not $skipSections) { $totalSteps++ }
+    if (-not $skipOutput)   { $totalSteps++ }
+    $currentStep  = 0
+
     # ================================================================
-    # STEP 1: Select Assessment Sections
+    # STEP: Select Assessment Sections (skipped when -Section provided)
     # ================================================================
-    $step1Done = $false
-    while (-not $step1Done) {
-        Show-Header
-        Show-StepHeader -Step 1 -Total 5 -Title 'Select Assessment Sections'
-        Write-Host '  Toggle sections by number, separated by spaces (e.g. 3 or 1 5 10).' -ForegroundColor $cNormal
-        Write-Host '  Press ENTER when done.' -ForegroundColor $cMuted
-        Write-Host ''
+    if ($skipSections) {
+        $selectedSections = $PreSelectedSections
+    }
+    else {
+        $step1Done = $false
+        while (-not $step1Done) {
+            Show-Header
+            $currentStep = 1
+            Show-StepHeader -Step $currentStep -Total $totalSteps -Title 'Select Assessment Sections'
+            Write-Host '  Toggle sections by number, separated by spaces (e.g. 3 or 1 5 10).' -ForegroundColor $cNormal
+            Write-Host '  Press ENTER when done.' -ForegroundColor $cMuted
+            Write-Host ''
 
-        foreach ($key in $sections.Keys) {
-            $s = $sections[$key]
-            $marker = if ($s.Selected) { '●' } else { '○' }
-            $color = if ($s.Selected) { $cNormal } else { $cMuted }
-            Write-Host "  [$key] $marker $($s.Label)" -ForegroundColor $color
-        }
+            foreach ($key in $sections.Keys) {
+                $s = $sections[$key]
+                $marker = if ($s.Selected) { '●' } else { '○' }
+                $color = if ($s.Selected) { $cNormal } else { $cMuted }
+                Write-Host "  [$key] $marker $($s.Label)" -ForegroundColor $color
+            }
 
-        Write-Host ''
-        Write-Host '  [S] Standard    [A] Select all    [N] Select none' -ForegroundColor $cPrompt
-        Write-Host ''
-        Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-        $userChoice = Read-Host
+            Write-Host ''
+            Write-Host '  [S] Standard    [A] Select all    [N] Select none' -ForegroundColor $cPrompt
+            Write-Host ''
+            Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
+            $userChoice = (Read-Host) ?? ''
 
-        switch ($userChoice.Trim().ToUpper()) {
-            'S' {
-                # Standard sections only (deselect opt-in)
-                # Rebuild dictionary to avoid PS OrderedDictionary in-place mutation bug
-                $optInSections = @('Inventory', 'ActiveDirectory', 'ScubaGear')
-                $rebuilt = [ordered]@{}
-                foreach ($k in @($sections.Keys)) {
-                    $rebuilt["$k"] = @{ Name = $sections[$k].Name; Label = $sections[$k].Label; Selected = ($sections[$k].Name -notin $optInSections) }
+            switch ($userChoice.Trim().ToUpper()) {
+                'S' {
+                    $optInSections = @('Inventory', 'ActiveDirectory', 'ScubaGear')
+                    $rebuilt = [ordered]@{}
+                    foreach ($k in @($sections.Keys)) {
+                        $rebuilt["$k"] = @{ Name = $sections[$k].Name; Label = $sections[$k].Label; Selected = ($sections[$k].Name -notin $optInSections) }
+                    }
+                    $sections = $rebuilt
                 }
-                $sections = $rebuilt
-            }
-            'A' {
-                # All sections including opt-in
-                $rebuilt = [ordered]@{}
-                foreach ($k in @($sections.Keys)) {
-                    $rebuilt["$k"] = @{ Name = $sections[$k].Name; Label = $sections[$k].Label; Selected = $true }
+                'A' {
+                    $rebuilt = [ordered]@{}
+                    foreach ($k in @($sections.Keys)) {
+                        $rebuilt["$k"] = @{ Name = $sections[$k].Name; Label = $sections[$k].Label; Selected = $true }
+                    }
+                    $sections = $rebuilt
                 }
-                $sections = $rebuilt
-            }
-            'N' {
-                $rebuilt = [ordered]@{}
-                foreach ($k in @($sections.Keys)) {
-                    $rebuilt["$k"] = @{ Name = $sections[$k].Name; Label = $sections[$k].Label; Selected = $false }
+                'N' {
+                    $rebuilt = [ordered]@{}
+                    foreach ($k in @($sections.Keys)) {
+                        $rebuilt["$k"] = @{ Name = $sections[$k].Name; Label = $sections[$k].Label; Selected = $false }
+                    }
+                    $sections = $rebuilt
                 }
-                $sections = $rebuilt
-            }
-            '' {
-                $selectedNames = @($sections.Values | Where-Object { $_.Selected } | ForEach-Object { $_.Name })
-                if ($selectedNames.Count -eq 0) {
-                    Write-Host ''
-                    Write-Host '  ✗ Please select at least one section.' -ForegroundColor $cError
-                    Start-Sleep -Seconds 1
+                '' {
+                    $selectedNames = @($sections.Values | Where-Object { $_.Selected } | ForEach-Object { $_.Name })
+                    if ($selectedNames.Count -eq 0) {
+                        Write-Host ''
+                        Write-Host '  ✗ Please select at least one section.' -ForegroundColor $cError
+                        Start-Sleep -Seconds 1
+                    }
+                    else {
+                        $step1Done = $true
+                    }
                 }
-                else {
-                    $step1Done = $true
-                }
-            }
-            default {
-                # Toggle sections by number (space or comma separated, e.g. "1 3 5" or "10")
-                $tokens = $userChoice.Trim() -split '[,\s]+'
-                foreach ($token in $tokens) {
-                    $num = 0
-                    if ($token -ne '' -and [int]::TryParse($token, [ref]$num) -and $sections.Contains("$num")) {
-                        $sections["$num"].Selected = -not $sections["$num"].Selected
+                default {
+                    $tokens = $userChoice.Trim() -split '[,\s]+'
+                    foreach ($token in $tokens) {
+                        $num = 0
+                        if ($token -ne '' -and [int]::TryParse($token, [ref]$num) -and $sections.Contains("$num")) {
+                            $sections["$num"].Selected = -not $sections["$num"].Selected
+                        }
                     }
                 }
             }
         }
+
+        $selectedSections = @($sections.Values | Where-Object { $_.Selected } | ForEach-Object { $_.Name })
     }
 
-    $selectedSections = @($sections.Values | Where-Object { $_.Selected } | ForEach-Object { $_.Name })
-
     # ================================================================
-    # STEP 2: Tenant Identity
+    # STEP: Tenant Identity
     # ================================================================
+    $currentStep++
     Show-Header
-    Show-StepHeader -Step 2 -Total 4 -Title 'Tenant Identity'
+    Show-StepHeader -Step $currentStep -Total $totalSteps -Title 'Tenant Identity'
     Write-Host '  Enter your tenant ID or domain' -ForegroundColor $cNormal
     Write-Host '  (e.g., contoso.onmicrosoft.com):' -ForegroundColor $cMuted
     Write-Host ''
     Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-    $tenantInput = Read-Host
+    $tenantInput = (Read-Host) ?? ''
 
     # ================================================================
-    # STEP 3: Authentication Method
+    # STEP: Authentication Method
     # ================================================================
+    $currentStep++
     $step3Done = $false
     $authMethod = 'Interactive'
     $wizClientId = ''
@@ -316,7 +348,7 @@ function Show-InteractiveWizard {
 
     while (-not $step3Done) {
         Show-Header
-        Show-StepHeader -Step 3 -Total 4 -Title 'Authentication Method'
+        Show-StepHeader -Step $currentStep -Total $totalSteps -Title 'Authentication Method'
 
         Write-Host '  [1] Interactive login (browser popup)' -ForegroundColor $cNormal
         Write-Host '  [2] Device code login (choose your browser)' -ForegroundColor $cNormal
@@ -324,7 +356,7 @@ function Show-InteractiveWizard {
         Write-Host '  [4] Skip connection (already connected)' -ForegroundColor $cNormal
         Write-Host ''
         Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-        $authInput = Read-Host
+        $authInput = (Read-Host) ?? ''
 
         switch ($authInput.Trim()) {
             '1' {
@@ -332,7 +364,7 @@ function Show-InteractiveWizard {
                 Write-Host ''
                 Write-Host '  Enter admin UPN for EXO/Purview (optional, press ENTER to skip):' -ForegroundColor $cNormal
                 Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-                $wizUpn = Read-Host
+                $wizUpn = (Read-Host) ?? ''
                 $step3Done = $true
             }
             '2' {
@@ -344,10 +376,10 @@ function Show-InteractiveWizard {
                 Write-Host ''
                 Write-Host '  Enter Application (Client) ID:' -ForegroundColor $cNormal
                 Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-                $wizClientId = Read-Host
+                $wizClientId = (Read-Host) ?? ''
                 Write-Host '  Enter Certificate Thumbprint:' -ForegroundColor $cNormal
                 Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-                $wizCertThumb = Read-Host
+                $wizCertThumb = (Read-Host) ?? ''
                 $step3Done = $true
             }
             '4' {
@@ -362,37 +394,41 @@ function Show-InteractiveWizard {
     }
 
     # ================================================================
-    # STEP 4: Output Folder
+    # STEP: Output Folder (skipped when -OutputFolder provided)
     # ================================================================
-    $defaultOutput = '.\M365-Assessment'
-    Show-Header
-    Show-StepHeader -Step 4 -Total 4 -Title 'Output Folder'
-    Write-Host '  Assessment results will be saved to:' -ForegroundColor $cNormal
-    Write-Host "    $defaultOutput\" -ForegroundColor $cSuccess
-    Write-Host ''
-    Write-Host '  Press ENTER to accept, or type a custom path:' -ForegroundColor $cMuted
-    do {
-        $outputValid = $true
-        Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-        $outputInput = Read-Host
-        if ($outputInput.Trim()) {
-            # Reject values that look like email/UPN rather than a folder path
-            if ($outputInput.Trim() -match '@') {
-                Write-Host ''
-                Write-Host '  That looks like an email address or UPN, not a folder path.' -ForegroundColor $cError
-                Write-Host "  Press ENTER to use the default ($defaultOutput), or type a valid path:" -ForegroundColor $cMuted
-                $outputValid = $false
+    if ($skipOutput) {
+        $wizOutputFolder = $PreSelectedOutputFolder
+    }
+    else {
+        $currentStep++
+        $defaultOutput = '.\M365-Assessment'
+        Show-Header
+        Show-StepHeader -Step $currentStep -Total $totalSteps -Title 'Output Folder'
+        Write-Host '  Assessment results will be saved to:' -ForegroundColor $cNormal
+        Write-Host "    $defaultOutput\" -ForegroundColor $cSuccess
+        Write-Host ''
+        Write-Host '  Press ENTER to accept, or type a custom path:' -ForegroundColor $cMuted
+        do {
+            $outputValid = $true
+            Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
+            $outputInput = (Read-Host) ?? ''
+            if ($outputInput.Trim()) {
+                if ($outputInput.Trim() -match '@') {
+                    Write-Host ''
+                    Write-Host '  That looks like an email address or UPN, not a folder path.' -ForegroundColor $cError
+                    Write-Host "  Press ENTER to use the default ($defaultOutput), or type a valid path:" -ForegroundColor $cMuted
+                    $outputValid = $false
+                }
+                elseif ($outputInput.Trim() -match '[<>"|?*]') {
+                    Write-Host ''
+                    Write-Host '  Path contains invalid characters ( < > " | ? * ).' -ForegroundColor $cError
+                    Write-Host "  Press ENTER to use the default ($defaultOutput), or type a valid path:" -ForegroundColor $cMuted
+                    $outputValid = $false
+                }
             }
-            # Reject paths containing characters invalid on Windows
-            elseif ($outputInput.Trim() -match '[<>"|?*]') {
-                Write-Host ''
-                Write-Host '  Path contains invalid characters ( < > " | ? * ).' -ForegroundColor $cError
-                Write-Host "  Press ENTER to use the default ($defaultOutput), or type a valid path:" -ForegroundColor $cMuted
-                $outputValid = $false
-            }
-        }
-    } while (-not $outputValid)
-    $wizOutputFolder = if ($outputInput.Trim()) { $outputInput.Trim() } else { $defaultOutput }
+        } while (-not $outputValid)
+        $wizOutputFolder = if ($outputInput.Trim()) { $outputInput.Trim() } else { $defaultOutput }
+    }
 
     # ================================================================
     # Confirmation
@@ -425,7 +461,7 @@ function Show-InteractiveWizard {
     Write-Host ''
     Write-Host '  Press ENTER to begin, or Q to quit.' -ForegroundColor $cPrompt
     Write-Host '  > ' -ForegroundColor $cPrompt -NoNewline
-    $confirmInput = Read-Host
+    $confirmInput = (Read-Host) ?? ''
 
     if ($confirmInput.Trim().ToUpper() -eq 'Q') {
         Write-Host ''
@@ -516,17 +552,26 @@ function Resolve-M365Environment {
 }
 
 # ------------------------------------------------------------------
-# Detect interactive mode: no explicit parameters supplied
+# Detect interactive mode: no connection parameters supplied
+# The wizard should launch whenever the user hasn't told us HOW to
+# connect (TenantId, SkipConnection, or app-only auth). Passing
+# -Section alone should still trigger the wizard for tenant input.
 # ------------------------------------------------------------------
-$isInteractive = -not $PSBoundParameters.ContainsKey('Section') -and
-                 -not $PSBoundParameters.ContainsKey('TenantId') -and
+$isInteractive = -not $PSBoundParameters.ContainsKey('TenantId') -and
                  -not $PSBoundParameters.ContainsKey('SkipConnection') -and
                  -not $PSBoundParameters.ContainsKey('ClientId') -and
-                 -not $PSBoundParameters.ContainsKey('OutputFolder')
+                 -not $PSBoundParameters.ContainsKey('ManagedIdentity')
 
 if ($isInteractive -and [Environment]::UserInteractive) {
     try {
-        $wizardParams = Show-InteractiveWizard
+        $wizSplat = @{}
+        if ($PSBoundParameters.ContainsKey('Section')) {
+            $wizSplat['PreSelectedSections'] = $Section
+        }
+        if ($PSBoundParameters.ContainsKey('OutputFolder')) {
+            $wizSplat['PreSelectedOutputFolder'] = $OutputFolder
+        }
+        $wizardParams = Show-InteractiveWizard @wizSplat
     }
     catch {
         Write-Warning "Interactive wizard failed: $($_.Exception.Message)"
@@ -542,9 +587,14 @@ if ($isInteractive -and [Environment]::UserInteractive) {
         return
     }
 
-    # Override script parameters with wizard selections
-    $Section = $wizardParams['Section']
-    $OutputFolder = $wizardParams['OutputFolder']
+    # Override script parameters with wizard selections, but preserve
+    # any values the user already provided on the command line
+    if (-not $PSBoundParameters.ContainsKey('Section')) {
+        $Section = $wizardParams['Section']
+    }
+    if (-not $PSBoundParameters.ContainsKey('OutputFolder')) {
+        $OutputFolder = $wizardParams['OutputFolder']
+    }
 
     if ($wizardParams.ContainsKey('TenantId')) {
         $TenantId = $wizardParams['TenantId']
@@ -964,7 +1014,7 @@ $collectorMap = [ordered]@{
         @{ Name = '10-Mail-Flow';        Script = 'Exchange-Online\Get-MailFlowReport.ps1';       Label = 'Mail Flow' }
         @{ Name = '11-Email-Security';   Script = 'Exchange-Online\Get-EmailSecurityReport.ps1';  Label = 'Email Security' }
         @{ Name = '11b-EXO-Security-Config'; Script = 'Exchange-Online\Get-ExoSecurityConfig.ps1'; Label = 'EXO Security Config' }
-        @{ Name = '12b-DNS-Security-Config'; Script = 'Exchange-Online\Get-DnsSecurityConfig.ps1'; Label = 'DNS Security Config' }
+        # DNS Security Config is deferred — runs after all sections using prefetched DNS cache
     )
     'Intune' = @(
         @{ Name = '13-Device-Summary';       Script = 'Intune\Get-DeviceSummary.ps1';             Label = 'Device Summary' }
@@ -1301,6 +1351,30 @@ function Connect-RequiredService {
                         $script:resolvedTenantId = $orgInfo.Id
                         $script:resolvedTenantDisplayName = $orgInfo.DisplayName
                         Write-AssessmentLog -Level INFO -Message "Connected tenant: $($script:resolvedTenantDisplayName) ($($script:resolvedTenantDomain)) [ID: $($script:resolvedTenantId)]" -Section $SectionName
+
+                        # Prefetch DNS records for all verified domains in background
+                        # (runs while auth and other collectors proceed)
+                        if ('Email' -in $Section) {
+                            $verifiedDomainNames = @($orgInfo.VerifiedDomains | ForEach-Object { $_.Name })
+                            Write-AssessmentLog -Level INFO -Message "Prefetching DNS records for $($verifiedDomainNames.Count) verified domain(s) in background" -Section $SectionName
+                            $script:dnsPrefetchJobs = @()
+                            foreach ($vdName in $verifiedDomainNames) {
+                                $script:dnsPrefetchJobs += Start-ThreadJob -ScriptBlock {
+                                    $d      = $using:vdName
+                                    $spf    = Resolve-DnsName -Name $d -Type TXT -DnsOnly -ErrorAction SilentlyContinue
+                                    $dmarc  = Resolve-DnsName -Name ('_dmarc.' + $d) -Type TXT -DnsOnly -ErrorAction SilentlyContinue
+                                    $dkim1  = Resolve-DnsName -Name ('selector1._domainkey.' + $d) -Type CNAME -DnsOnly -ErrorAction SilentlyContinue
+                                    $dkim2  = Resolve-DnsName -Name ('selector2._domainkey.' + $d) -Type CNAME -DnsOnly -ErrorAction SilentlyContinue
+                                    $mtaSts = Resolve-DnsName -Name ('_mta-sts.' + $d) -Type TXT -DnsOnly -ErrorAction SilentlyContinue
+                                    $tlsRpt = Resolve-DnsName -Name ('_smtp._tls.' + $d) -Type TXT -DnsOnly -ErrorAction SilentlyContinue
+                                    [PSCustomObject]@{
+                                        Domain = $d; Spf = $spf; Dmarc = $dmarc
+                                        Dkim1 = $dkim1; Dkim2 = $dkim2
+                                        MtaSts = $mtaSts; TlsRpt = $tlsRpt
+                                    }
+                                }
+                            }
+                        }
 
                         # Phase B: Rename folder/files to include domain prefix if not already set
                         if (-not $script:domainPrefix -and $script:resolvedTenantDomain -match '^([^.]+)\.onmicrosoft\.(com|us)$') {
@@ -1787,233 +1861,311 @@ foreach ($sectionName in $Section) {
         Write-AssessmentLog -Level INFO -Message "Completed: $($collector.Label) — $status, $itemCount items, $($duration.TotalSeconds.ToString('F1'))s" -Section $sectionName -Collector $collector.Label
     }
 
-    # DNS Authentication: runs after Email section using accepted domains
+    # DNS Authentication: deferred until after all sections complete
     if ($sectionName -eq 'Email') {
-        $dnsStart = Get-Date
-        $dnsCsvPath = Join-Path -Path $assessmentFolder -ChildPath "$($dnsCollector.Name).csv"
-        $dnsStatus = 'Skipped'
-        $dnsItemCount = 0
-        $dnsError = ''
+        $script:runDnsAuthentication = $true
+    }
+}
 
-        Write-AssessmentLog -Level INFO -Message "Running: $($dnsCollector.Label)" -Section 'Email' -Collector $dnsCollector.Label
 
-        try {
-            $acceptedDomains = Get-AcceptedDomain -ErrorAction Stop
-            $dnsResults = foreach ($domain in $acceptedDomains) {
-                $domainName = $domain.DomainName
+# ------------------------------------------------------------------
+# Deferred DNS checks (runs after all sections, uses prefetch cache)
+# ------------------------------------------------------------------
+if ($script:runDnsAuthentication) {
+    # Verify Exchange Online is still connected (session may have dropped)
+    $exoAvailable = $false
+    try {
+        $null = Get-Command -Name Get-AcceptedDomain -ErrorAction Stop
+        $exoAvailable = $true
+    }
+    catch {
+        # Try to reconnect
+        if (-not $SkipConnection -and -not $failedServices.Contains('ExchangeOnline')) {
+            Write-AssessmentLog -Level INFO -Message "Reconnecting Exchange Online for deferred DNS checks" -Section 'Email'
+            try {
+                Connect-RequiredService -Services @('ExchangeOnline') -SectionName 'Email'
+                $exoAvailable = $true
+            }
+            catch {
+                Write-AssessmentLog -Level WARN -Message "Could not reconnect Exchange Online: $($_.Exception.Message)" -Section 'Email'
+            }
+        }
+    }
 
-                # ------- SPF -------
-                $spf = 'Not configured'
-                $spfEnforcement = 'N/A'
-                $spfLookupCount = 'N/A'
-                $spfDuplicates = 'No'
+    if (-not $exoAvailable) {
+        Write-AssessmentLog -Level WARN -Message "Skipping deferred DNS checks -- Exchange Online not available" -Section 'Email'
+    }
+    else {
 
-                try {
-                    $txtRecords = @(Resolve-DnsName -Name $domainName -Type TXT -ErrorAction Stop)
-                    $spfRecords = @($txtRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=spf1') })
+    # Collect prefetched DNS cache (started during Graph connect)
+    $dnsCache = @{}
+    if ($script:dnsPrefetchJobs) {
+        Write-Verbose "Collecting DNS prefetch results..."
+        $prefetchResults = $script:dnsPrefetchJobs | Wait-Job | Receive-Job
+        $script:dnsPrefetchJobs | Remove-Job -Force
+        foreach ($pr in $prefetchResults) { $dnsCache[$pr.Domain] = $pr }
+        $script:dnsPrefetchJobs = $null
+    }
 
-                    if ($spfRecords.Count -gt 1) {
-                        $spfDuplicates = "Yes ($($spfRecords.Count) records — PermError)"
-                    }
+    # --- DNS Security Config collector (uses prefetch cache) ---
+    $dnsSecConfigCollector = @{ Name = '12b-DNS-Security-Config'; Label = 'DNS Security Config' }
+    $dnsSecStart = Get-Date
+    $dnsSecCsvPath = Join-Path -Path $assessmentFolder -ChildPath "$($dnsSecConfigCollector.Name).csv"
+    $dnsSecStatus = 'Skipped'
+    $dnsSecItemCount = 0
+    $dnsSecError = ''
 
-                    if ($spfRecords.Count -ge 1) {
-                        $spfValue = $spfRecords[0].Strings -join ''
-                        $spf = $spfValue
+    Write-AssessmentLog -Level INFO -Message "Running: $($dnsSecConfigCollector.Label)" -Section 'Email' -Collector $dnsSecConfigCollector.Label
+    try {
+        $dnsSecScriptPath = Join-Path -Path $projectRoot -ChildPath 'Exchange-Online\Get-DnsSecurityConfig.ps1'
+        $dnsSecResults = & $dnsSecScriptPath
+        if ($dnsSecResults) {
+            $dnsSecItemCount = Export-AssessmentCsv -Path $dnsSecCsvPath -Data @($dnsSecResults) -Label $dnsSecConfigCollector.Label
+            $dnsSecStatus = 'Complete'
+        }
+    }
+    catch {
+        $dnsSecError = $_.Exception.Message
+        $dnsSecStatus = 'Failed'
+        Write-AssessmentLog -Level ERROR -Message "DNS Security Config failed: $dnsSecError" -Section 'Email' -Collector $dnsSecConfigCollector.Label
+    }
 
-                        # Parse enforcement qualifier
-                        if ($spfValue -match '-all$') { $spfEnforcement = 'Hard Fail (-all)' }
-                        elseif ($spfValue -match '~all$') { $spfEnforcement = 'Soft Fail (~all)' }
-                        elseif ($spfValue -match '\?all$') { $spfEnforcement = 'Neutral (?all)' }
-                        elseif ($spfValue -match '\+all$') { $spfEnforcement = 'Pass (+all) WARNING' }
-                        else { $spfEnforcement = 'No all mechanism' }
+    $dnsSecDuration = (Get-Date) - $dnsSecStart
+    $summaryResults.Add([PSCustomObject]@{
+        Section   = 'Email'
+        Collector = $dnsSecConfigCollector.Label
+        FileName  = "$($dnsSecConfigCollector.Name).csv"
+        Status    = $dnsSecStatus
+        Items     = $dnsSecItemCount
+        Duration  = '{0:mm\:ss}' -f $dnsSecDuration
+        Error     = $dnsSecError
+    })
+    Show-CollectorResult -Label $dnsSecConfigCollector.Label -Status $dnsSecStatus -Items $dnsSecItemCount -DurationSeconds $dnsSecDuration.TotalSeconds -ErrorMessage $dnsSecError
+    Write-AssessmentLog -Level INFO -Message "Completed: $($dnsSecConfigCollector.Label) -- $dnsSecStatus, $dnsSecItemCount items" -Section 'Email' -Collector $dnsSecConfigCollector.Label
 
-                        # Count DNS-lookup mechanisms (10-lookup limit per RFC 7208)
-                        $lookupMechanisms = @(
-                            [regex]::Matches($spfValue, '\b(include:|a:|a/|mx:|mx/|ptr:|exists:|redirect=)').Count
-                        )
-                        $spfLookupCount = "$($lookupMechanisms[0]) / 10"
-                        if ($lookupMechanisms[0] -gt 10) {
-                            $spfLookupCount = "$($lookupMechanisms[0]) / 10 — EXCEEDS LIMIT"
-                        }
-                    }
+    # --- DNS Authentication enumeration ---
+    $dnsStart = Get-Date
+    $dnsCsvPath = Join-Path -Path $assessmentFolder -ChildPath "$($dnsCollector.Name).csv"
+    $dnsStatus = 'Skipped'
+    $dnsItemCount = 0
+    $dnsError = ''
+
+    Write-AssessmentLog -Level INFO -Message "Running: $($dnsCollector.Label)" -Section 'Email' -Collector $dnsCollector.Label
+
+    try {
+        $acceptedDomains = Get-AcceptedDomain -ErrorAction Stop
+
+        $dnsResults = foreach ($domain in $acceptedDomains) {
+            $domainName = $domain.DomainName
+            $cached = $dnsCache[$domainName]
+
+            # ------- SPF -------
+            $spf = 'Not configured'
+            $spfEnforcement = 'N/A'
+            $spfLookupCount = 'N/A'
+            $spfDuplicates = 'No'
+
+            try {
+                $txtRecords = if ($cached -and $cached.PSObject.Properties['Spf']) { @($cached.Spf) } else { @(Resolve-DnsName -Name $domainName -Type TXT -DnsOnly -ErrorAction SilentlyContinue) }
+                $spfRecords = @($txtRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=spf1') })
+
+                if ($spfRecords.Count -gt 1) {
+                    $spfDuplicates = "Yes ($($spfRecords.Count) records -- PermError)"
                 }
-                catch {
-                    $spf = 'DNS lookup failed'
-                    Write-Verbose "SPF lookup failed for $domainName`: $_"
-                }
 
-                # ------- DMARC -------
-                $dmarc = 'Not configured'
-                $dmarcPolicy = 'N/A'
-                $dmarcPct = 'N/A'
-                $dmarcReporting = 'N/A'
-                $dmarcDuplicates = 'No'
+                if ($spfRecords.Count -ge 1) {
+                    $spfValue = $spfRecords[0].Strings -join ''
+                    $spf = $spfValue
 
-                try {
-                    $dmarcTxtRecords = @(Resolve-DnsName -Name "_dmarc.$domainName" -Type TXT -ErrorAction Stop)
-                    $dmarcRecords = @($dmarcTxtRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=DMARC1') })
+                    if ($spfValue -match '-all$') { $spfEnforcement = 'Hard Fail (-all)' }
+                    elseif ($spfValue -match '~all$') { $spfEnforcement = 'Soft Fail (~all)' }
+                    elseif ($spfValue -match '\?all$') { $spfEnforcement = 'Neutral (?all)' }
+                    elseif ($spfValue -match '\+all$') { $spfEnforcement = 'Pass (+all) WARNING' }
+                    else { $spfEnforcement = 'No all mechanism' }
 
-                    if ($dmarcRecords.Count -gt 1) {
-                        $dmarcDuplicates = "Yes ($($dmarcRecords.Count) records — PermError)"
-                    }
-
-                    if ($dmarcRecords.Count -ge 1) {
-                        $dmarcValue = $dmarcRecords[0].Strings -join ''
-                        $dmarc = $dmarcValue
-
-                        # Parse policy
-                        if ($dmarcValue -match 'p=(\w+)') {
-                            $dmarcPolicy = $Matches[1]
-                            if ($dmarcPolicy -eq 'none') { $dmarcPolicy = 'none (monitoring only)' }
-                        }
-
-                        # Parse percentage
-                        if ($dmarcValue -match 'pct=(\d+)') {
-                            $dmarcPct = "$($Matches[1])%"
-                        }
-                        else {
-                            $dmarcPct = '100% (default)'
-                        }
-
-                        # Parse reporting
-                        $reportingParts = @()
-                        if ($dmarcValue -match 'rua=([^;]+)') { $reportingParts += "rua=$($Matches[1])" }
-                        if ($dmarcValue -match 'ruf=([^;]+)') { $reportingParts += "ruf=$($Matches[1])" }
-                        $dmarcReporting = if ($reportingParts.Count -gt 0) { $reportingParts -join '; ' } else { 'No reporting configured' }
-                    }
-                }
-                catch {
-                    $dmarc = 'Not configured'
-                    Write-Verbose "DMARC lookup failed for $domainName`: $_"
-                }
-
-                # ------- DKIM (both selectors) -------
-                $dkimSelector1 = 'Not configured'
-                $dkimSelector2 = 'Not configured'
-
-                try {
-                    $dkim1Records = Resolve-DnsName -Name "selector1._domainkey.$domainName" -Type CNAME -ErrorAction Stop
-                    if ($dkim1Records.NameHost) { $dkimSelector1 = $dkim1Records.NameHost }
-                }
-                catch { Write-Verbose "DKIM selector1 lookup failed for $domainName`: $_" }
-
-                try {
-                    $dkim2Records = Resolve-DnsName -Name "selector2._domainkey.$domainName" -Type CNAME -ErrorAction Stop
-                    if ($dkim2Records.NameHost) { $dkimSelector2 = $dkim2Records.NameHost }
-                }
-                catch { Write-Verbose "DKIM selector2 lookup failed for $domainName`: $_" }
-
-                # ------- MTA-STS (RFC 8461) -------
-                $mtaSts = 'Not configured'
-                try {
-                    $mtaStsRecords = @(Resolve-DnsName -Name "_mta-sts.$domainName" -Type TXT -ErrorAction Stop)
-                    $mtaStsRecord = $mtaStsRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match 'v=STSv1') } | Select-Object -First 1
-                    if ($mtaStsRecord) {
-                        $mtaSts = $mtaStsRecord.Strings -join ''
-                    }
-                }
-                catch { Write-Verbose "MTA-STS lookup failed for $domainName`: $_" }
-
-                # ------- TLS-RPT (RFC 8460) -------
-                $tlsRpt = 'Not configured'
-                try {
-                    $tlsRptRecords = @(Resolve-DnsName -Name "_smtp._tls.$domainName" -Type TXT -ErrorAction Stop)
-                    $tlsRptRecord = $tlsRptRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=TLSRPTv1') } | Select-Object -First 1
-                    if ($tlsRptRecord) {
-                        $tlsRpt = $tlsRptRecord.Strings -join ''
+                    $lookupMechanisms = @(
+                        [regex]::Matches($spfValue, '\b(include:|a:|a/|mx:|mx/|ptr:|exists:|redirect=)').Count
+                    )
+                    $spfLookupCount = "$($lookupMechanisms[0]) / 10"
+                    if ($lookupMechanisms[0] -gt 10) {
+                        $spfLookupCount = "$($lookupMechanisms[0]) / 10 -- EXCEEDS LIMIT"
                     }
                 }
-                catch { Write-Verbose "TLS-RPT lookup failed for $domainName`: $_" }
+            }
+            catch {
+                $spf = 'DNS lookup failed'
+                Write-Verbose "SPF lookup failed for $domainName`: $_"
+            }
 
-                # ------- Public DNS Validation -------
-                # Confirm SPF and DMARC are visible from public resolvers (Google 8.8.8.8, Cloudflare 1.1.1.1)
-                $publicDnsConfirmed = 'N/A'
-                if ($spf -ne 'Not configured' -and $spf -ne 'DNS lookup failed') {
-                    $publicChecks = @()
-                    foreach ($publicServer in @('8.8.8.8', '1.1.1.1')) {
-                        try {
-                            $publicTxt = @(Resolve-DnsName -Name $domainName -Type TXT -Server $publicServer -ErrorAction Stop)
-                            $publicSpf = $publicTxt | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=spf1') } | Select-Object -First 1
-                            if ($publicSpf) { $publicChecks += $publicServer }
-                        }
-                        catch { Write-Verbose "Public DNS check ($publicServer) failed for $domainName`: $_" }
+            # ------- DMARC -------
+            $dmarc = 'Not configured'
+            $dmarcPolicy = 'N/A'
+            $dmarcPct = 'N/A'
+            $dmarcReporting = 'N/A'
+            $dmarcDuplicates = 'No'
+
+            try {
+                $dmarcTxtRecords = if ($cached -and $cached.PSObject.Properties['Dmarc']) { @($cached.Dmarc) } else { @(Resolve-DnsName -Name "_dmarc.$domainName" -Type TXT -DnsOnly -ErrorAction SilentlyContinue) }
+                $dmarcRecords = @($dmarcTxtRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=DMARC1') })
+
+                if ($dmarcRecords.Count -gt 1) {
+                    $dmarcDuplicates = "Yes ($($dmarcRecords.Count) records -- PermError)"
+                }
+
+                if ($dmarcRecords.Count -ge 1) {
+                    $dmarcValue = $dmarcRecords[0].Strings -join ''
+                    $dmarc = $dmarcValue
+
+                    if ($dmarcValue -match 'p=(\w+)') {
+                        $dmarcPolicy = $Matches[1]
+                        if ($dmarcPolicy -eq 'none') { $dmarcPolicy = 'none (monitoring only)' }
                     }
 
-                    if ($publicChecks.Count -eq 2) {
-                        $publicDnsConfirmed = 'Confirmed (Google + Cloudflare)'
-                    }
-                    elseif ($publicChecks.Count -eq 1) {
-                        $publicDnsConfirmed = "Partial ($($publicChecks[0]) only)"
+                    if ($dmarcValue -match 'pct=(\d+)') {
+                        $dmarcPct = "$($Matches[1])%"
                     }
                     else {
-                        $publicDnsConfirmed = 'NOT visible from public DNS'
+                        $dmarcPct = '100% (default)'
                     }
-                }
 
-                [PSCustomObject]@{
-                    Domain           = $domainName
-                    DomainType       = $domain.DomainType
-                    Default          = $domain.Default
-                    SPF              = if ($spf) { $spf } else { 'Not configured' }
-                    SPFEnforcement   = $spfEnforcement
-                    SPFLookupCount   = $spfLookupCount
-                    SPFDuplicates    = $spfDuplicates
-                    DMARC            = if ($dmarc) { $dmarc } else { 'Not configured' }
-                    DMARCPolicy      = $dmarcPolicy
-                    DMARCPct         = $dmarcPct
-                    DMARCReporting   = $dmarcReporting
-                    DMARCDuplicates  = $dmarcDuplicates
-                    DKIMSelector1    = $dkimSelector1
-                    DKIMSelector2    = $dkimSelector2
-                    MTASTS           = $mtaSts
-                    TLSRPT           = $tlsRpt
-                    PublicDNSConfirm = $publicDnsConfirmed
+                    $reportingParts = @()
+                    if ($dmarcValue -match 'rua=([^;]+)') { $reportingParts += "rua=$($Matches[1])" }
+                    if ($dmarcValue -match 'ruf=([^;]+)') { $reportingParts += "ruf=$($Matches[1])" }
+                    $dmarcReporting = if ($reportingParts.Count -gt 0) { $reportingParts -join '; ' } else { 'No reporting configured' }
                 }
             }
-
-            if ($dnsResults) {
-                $dnsItemCount = Export-AssessmentCsv -Path $dnsCsvPath -Data @($dnsResults) -Label $dnsCollector.Label
-                $dnsStatus = 'Complete'
+            catch {
+                $dmarc = 'Not configured'
+                Write-Verbose "DMARC lookup failed for $domainName`: $_"
             }
-            else {
-                $dnsStatus = 'Complete'
+
+            # ------- DKIM (both selectors) -------
+            $dkimSelector1 = 'Not configured'
+            $dkimSelector2 = 'Not configured'
+
+            try {
+                $dkim1Records = if ($cached -and $cached.PSObject.Properties['Dkim1']) { $cached.Dkim1 } else { Resolve-DnsName -Name "selector1._domainkey.$domainName" -Type CNAME -DnsOnly -ErrorAction SilentlyContinue }
+                if ($dkim1Records.NameHost) { $dkimSelector1 = $dkim1Records.NameHost }
+            }
+            catch { Write-Verbose "DKIM selector1 lookup failed for $domainName`: $_" }
+
+            try {
+                $dkim2Records = if ($cached -and $cached.PSObject.Properties['Dkim2']) { $cached.Dkim2 } else { Resolve-DnsName -Name "selector2._domainkey.$domainName" -Type CNAME -DnsOnly -ErrorAction SilentlyContinue }
+                if ($dkim2Records.NameHost) { $dkimSelector2 = $dkim2Records.NameHost }
+            }
+            catch { Write-Verbose "DKIM selector2 lookup failed for $domainName`: $_" }
+
+            # ------- MTA-STS (RFC 8461) -------
+            $mtaSts = 'Not configured'
+            try {
+                $mtaStsRecords = if ($cached -and $cached.PSObject.Properties['MtaSts']) { @($cached.MtaSts) } else { @(Resolve-DnsName -Name "_mta-sts.$domainName" -Type TXT -DnsOnly -ErrorAction SilentlyContinue) }
+                $mtaStsRecord = $mtaStsRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match 'v=STSv1') } | Select-Object -First 1
+                if ($mtaStsRecord) {
+                    $mtaSts = $mtaStsRecord.Strings -join ''
+                }
+            }
+            catch { Write-Verbose "MTA-STS lookup failed for $domainName`: $_" }
+
+            # ------- TLS-RPT (RFC 8460) -------
+            $tlsRpt = 'Not configured'
+            try {
+                $tlsRptRecords = if ($cached -and $cached.PSObject.Properties['TlsRpt']) { @($cached.TlsRpt) } else { @(Resolve-DnsName -Name "_smtp._tls.$domainName" -Type TXT -DnsOnly -ErrorAction SilentlyContinue) }
+                $tlsRptRecord = $tlsRptRecords | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=TLSRPTv1') } | Select-Object -First 1
+                if ($tlsRptRecord) {
+                    $tlsRpt = $tlsRptRecord.Strings -join ''
+                }
+            }
+            catch { Write-Verbose "TLS-RPT lookup failed for $domainName`: $_" }
+
+            # ------- Public DNS Validation -------
+            $publicDnsConfirmed = 'N/A'
+            if ($spf -ne 'Not configured' -and $spf -ne 'DNS lookup failed') {
+                $publicChecks = @()
+                foreach ($publicServer in @('8.8.8.8', '1.1.1.1')) {
+                    try {
+                        $publicTxt = @(Resolve-DnsName -Name $domainName -Type TXT -Server $publicServer -DnsOnly -ErrorAction Stop)
+                        $publicSpf = $publicTxt | Where-Object { $_.Strings -and ($_.Strings -join '' -match '^v=spf1') } | Select-Object -First 1
+                        if ($publicSpf) { $publicChecks += $publicServer }
+                    }
+                    catch { Write-Verbose "Public DNS check ($publicServer) failed for $domainName`: $_" }
+                }
+
+                if ($publicChecks.Count -eq 2) {
+                    $publicDnsConfirmed = 'Confirmed (Google + Cloudflare)'
+                }
+                elseif ($publicChecks.Count -eq 1) {
+                    $publicDnsConfirmed = "Partial ($($publicChecks[0]) only)"
+                }
+                else {
+                    $publicDnsConfirmed = 'NOT visible from public DNS'
+                }
+            }
+
+            [PSCustomObject]@{
+                Domain           = $domainName
+                DomainType       = $domain.DomainType
+                Default          = $domain.Default
+                SPF              = if ($spf) { $spf } else { 'Not configured' }
+                SPFEnforcement   = $spfEnforcement
+                SPFLookupCount   = $spfLookupCount
+                SPFDuplicates    = $spfDuplicates
+                DMARC            = if ($dmarc) { $dmarc } else { 'Not configured' }
+                DMARCPolicy      = $dmarcPolicy
+                DMARCPct         = $dmarcPct
+                DMARCReporting   = $dmarcReporting
+                DMARCDuplicates  = $dmarcDuplicates
+                DKIMSelector1    = $dkimSelector1
+                DKIMSelector2    = $dkimSelector2
+                MTASTS           = $mtaSts
+                TLSRPT           = $tlsRpt
+                PublicDNSConfirm = $publicDnsConfirmed
             }
         }
-        catch {
-            $dnsError = $_.Exception.Message
-            if ($dnsError -match 'not recognized|not found|not connected') {
-                $dnsStatus = 'Skipped'
-            }
-            else {
-                $dnsStatus = 'Failed'
-            }
-            Write-AssessmentLog -Level ERROR -Message "DNS Authentication failed" -Section 'Email' -Collector $dnsCollector.Label -Detail $_.Exception.ToString()
-            $issues.Add([PSCustomObject]@{
-                Severity     = if ($dnsStatus -eq 'Skipped') { 'WARNING' } else { 'ERROR' }
-                Section      = 'Email'
-                Collector    = $dnsCollector.Label
-                Description  = 'DNS Authentication check failed'
-                ErrorMessage = $dnsError
-                Action       = Get-RecommendedAction -ErrorMessage $dnsError
-            })
+
+        if ($dnsResults) {
+            $dnsItemCount = Export-AssessmentCsv -Path $dnsCsvPath -Data @($dnsResults) -Label $dnsCollector.Label
+            $dnsStatus = 'Complete'
         }
-
-        $dnsEnd = Get-Date
-        $dnsDuration = $dnsEnd - $dnsStart
-
-        $summaryResults.Add([PSCustomObject]@{
-            Section   = 'Email'
-            Collector = $dnsCollector.Label
-            FileName  = "$($dnsCollector.Name).csv"
-            Status    = $dnsStatus
-            Items     = $dnsItemCount
-            Duration  = '{0:mm\:ss}' -f $dnsDuration
-            Error     = $dnsError
-        })
-
-        Show-CollectorResult -Label $dnsCollector.Label -Status $dnsStatus -Items $dnsItemCount -DurationSeconds $dnsDuration.TotalSeconds -ErrorMessage $dnsError
-        Write-AssessmentLog -Level INFO -Message "Completed: $($dnsCollector.Label) — $dnsStatus, $dnsItemCount items" -Section 'Email' -Collector $dnsCollector.Label
+        else {
+            $dnsStatus = 'Complete'
+        }
     }
+    catch {
+        $dnsError = $_.Exception.Message
+        if ($dnsError -match 'not recognized|not found|not connected') {
+            $dnsStatus = 'Skipped'
+        }
+        else {
+            $dnsStatus = 'Failed'
+        }
+        Write-AssessmentLog -Level ERROR -Message "DNS Authentication failed" -Section 'Email' -Collector $dnsCollector.Label -Detail $_.Exception.ToString()
+        $issues.Add([PSCustomObject]@{
+            Severity     = if ($dnsStatus -eq 'Skipped') { 'WARNING' } else { 'ERROR' }
+            Section      = 'Email'
+            Collector    = $dnsCollector.Label
+            Description  = 'DNS Authentication check failed'
+            ErrorMessage = $dnsError
+            Action       = Get-RecommendedAction -ErrorMessage $dnsError
+        })
+    }
+
+    $dnsEnd = Get-Date
+    $dnsDuration = $dnsEnd - $dnsStart
+
+    $summaryResults.Add([PSCustomObject]@{
+        Section   = 'Email'
+        Collector = $dnsCollector.Label
+        FileName  = "$($dnsCollector.Name).csv"
+        Status    = $dnsStatus
+        Items     = $dnsItemCount
+        Duration  = '{0:mm\:ss}' -f $dnsDuration
+        Error     = $dnsError
+    })
+
+    Show-CollectorResult -Label $dnsCollector.Label -Status $dnsStatus -Items $dnsItemCount -DurationSeconds $dnsDuration.TotalSeconds -ErrorMessage $dnsError
+    Write-AssessmentLog -Level INFO -Message "Completed: $($dnsCollector.Label) -- $dnsStatus, $dnsItemCount items" -Section 'Email' -Collector $dnsCollector.Label
+
+    } # end else (exoAvailable)
 }
 
 # Clean up check progress display
@@ -2056,6 +2208,9 @@ if (Test-Path -Path $reportScriptPath) {
         if ($script:domainPrefix) { $reportParams['TenantName'] = $script:domainPrefix }
         elseif ($TenantId)        { $reportParams['TenantName'] = $TenantId }
         if ($NoBranding) { $reportParams['NoBranding'] = $true }
+        if ($SkipComplianceOverview) { $reportParams['SkipComplianceOverview'] = $true }
+        if ($SkipCoverPage) { $reportParams['SkipCoverPage'] = $true }
+        if ($SkipExecutiveSummary) { $reportParams['SkipExecutiveSummary'] = $true }
 
         $reportOutput = & $reportScriptPath @reportParams
         foreach ($line in $reportOutput) {

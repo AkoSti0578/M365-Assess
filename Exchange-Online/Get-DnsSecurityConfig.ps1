@@ -113,6 +113,10 @@ if ($authDomains.Count -eq 0) {
     Add-Setting @settingParams
 }
 else {
+    # DNS checks use Continue to prevent non-terminating errors (e.g., from
+    # Resolve-DnsName SOA fallback records) from escalating under the script-level Stop.
+    $ErrorActionPreference = 'Continue'
+
     # ------------------------------------------------------------------
     # 1. SPF Records (CIS 2.1.8)
     # ------------------------------------------------------------------
@@ -122,8 +126,8 @@ else {
         $spfPresent = @()
         foreach ($domain in $authDomains) {
             $domainName = $domain.DomainName
-            $txtRecords = Resolve-DnsName -Name $domainName -Type TXT -ErrorAction SilentlyContinue
-            $spfRecord = $txtRecords | Where-Object { $_.Strings -match '^v=spf1' }
+            $txtRecords = @(Resolve-DnsName -Name $domainName -Type TXT -DnsOnly -ErrorAction SilentlyContinue 2>$null)
+            $spfRecord = $txtRecords | Where-Object { $_.Strings -and $_.Strings -match '^v=spf1' }
             if ($spfRecord) { $spfPresent += $domainName }
             else { $spfMissing += $domainName }
         }
@@ -226,8 +230,8 @@ else {
         $dmarcStrong = @()
         foreach ($domain in $authDomains) {
             $domainName = $domain.DomainName
-            $dmarcRecords = Resolve-DnsName -Name "_dmarc.$domainName" -Type TXT -ErrorAction SilentlyContinue
-            $dmarcRecord = $dmarcRecords | Where-Object { $_.Strings -match '^v=DMARC1' }
+            $dmarcRecords = @(Resolve-DnsName -Name "_dmarc.$domainName" -Type TXT -DnsOnly -ErrorAction SilentlyContinue 2>$null)
+            $dmarcRecord = $dmarcRecords | Where-Object { $_.Strings -and $_.Strings -match '^v=DMARC1' }
             if (-not $dmarcRecord) {
                 $dmarcMissing += $domainName
             }
@@ -271,6 +275,8 @@ else {
     catch {
         Write-Warning "Could not check DMARC records: $_"
     }
+
+    $ErrorActionPreference = 'Stop'
 }
 
 # ------------------------------------------------------------------
